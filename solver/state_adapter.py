@@ -64,17 +64,23 @@ class StateAdapter:
 
         # ---------- 2) 环境/输出映射：env_* -> 可视化通道键 ----------
         # 你控制面板期望 env_wind_speed / env_wave_elev
-        if "env_WindSpeed" in data:
-            out["env_wind_speed"] = float(data["env_WindSpeed"])
-        if "env_WaveElev" in data:
-            out["env_wave_elev"] = float(data["env_WaveElev"])
+        wind_key = "env_WindSpeed" if "env_WindSpeed" in data else "WindSpeed"
+        wave_key = "env_WaveElev" if "env_WaveElev" in data else "WaveElev"
+        if wind_key in data:
+            out["env_wind_speed"] = float(data[wind_key])
+        if wave_key in data:
+            out["env_wave_elev"] = float(data[wave_key])
+        if "CurrentSpeed" in data:
+            out["env_current_speed"] = float(data["CurrentSpeed"])
 
         # 你控制面板还配置了 thrust / gen_torque
         # v2 worker 里叫 env_AeroThrust / env_GenTorque
-        if "env_AeroThrust" in data:
-            out["thrust"] = float(data["env_AeroThrust"])
-        if "env_GenTorque" in data:
-            out["gen_torque"] = float(data["env_GenTorque"])
+        thrust_key = "env_AeroThrust" if "env_AeroThrust" in data else "AeroThrust"
+        torque_key = "env_GenTorque" if "env_GenTorque" in data else "GenTq"
+        if thrust_key in data:
+            out["thrust"] = float(data[thrust_key])
+        if torque_key in data:
+            out["gen_torque"] = float(data[torque_key])
 
         # （可选）保证通道一定存在，防止 UI 勾选后 key 不存在报错/空图
         self._fill_defaults(out)
@@ -99,6 +105,7 @@ class StateAdapter:
             "qB2F1","qB2E1","qB2F2",
             "qB3F1","qB3E1","qB3F2",
             "env_wind_speed","env_wave_elev",
+            "env_current_speed",
             "thrust","gen_torque",
         ]
         for k in defaults:

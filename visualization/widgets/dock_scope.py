@@ -4,8 +4,6 @@ from PySide6.QtCore import Qt
 import pyqtgraph as pg
 import numpy as np
 import csv
-import datetime
-import os
 
 class ScopeSettingsDialog(QDialog):
     """V2.3 示波器设置 (保持 V2.2 逻辑)"""
@@ -102,7 +100,7 @@ class ScopeDockWidget(QWidget):
         self.curves = {}
         self.data_history = []
 
-        self.csv_file = None; self.csv_writer = None; self.current_log_path = ""
+        self.current_log_path = ""
         self.y_auto = True; self.y_range = (-10, 10)
 
         # Connections
@@ -158,14 +156,7 @@ class ScopeDockWidget(QWidget):
                 curve.setData(times, np.array(self.data_buffers[k]))
 
     def update_data(self, data_frame):
-        # 1. CSV Save
-        if self.csv_file and self.csv_writer is None:
-            fieldnames = list(data_frame.keys())
-            self.csv_writer = csv.DictWriter(self.csv_file, fieldnames=fieldnames)
-            self.csv_writer.writeheader()
-        if self.csv_writer: self.csv_writer.writerow(data_frame)
-
-        # 2. Store Memory (Full History)
+        # 1. Store Memory (Full History)
         self.data_history.append(data_frame)
         t = data_frame['time']
         self.time_history.append(t)
@@ -176,7 +167,7 @@ class ScopeDockWidget(QWidget):
                 self.data_buffers[key] = []
             self.data_buffers[key].append(val)
 
-        # 3. Update Plots (Active only)
+        # 2. Update Plots (Active only)
         # Optimization: Don't convert full list to numpy array every frame if array is huge
         # But for <100k points, modern CPUs handle it fine.
         # For simplicity in V2.3: Convert full array.
@@ -196,19 +187,6 @@ class ScopeDockWidget(QWidget):
         self.plot_widget.clear()
         self.curves = {}
         self.update_channels(self.active_channels)
-        self._init_recording()
-
-    def _init_recording(self):
-        if self.csv_file: self.csv_file.close()
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        folder = os.path.join("data", f"Run_{timestamp}_LabFAST_V0.0.1")
-        if not os.path.exists(folder): os.makedirs(folder)
-        filename = os.path.join(folder, "full_record.csv")
-        self.current_log_path = folder
-        try:
-            self.csv_file = open(filename, 'w', newline='')
-            self.csv_writer = None
-        except: pass
 
     def export_data(self):
         if not self.data_history: return
