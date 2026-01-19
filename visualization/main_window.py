@@ -6,7 +6,7 @@ from PySide6.QtGui import QFont
 from config.fast_params import SystemParams
 from solver.worker import SimulationWorker
 from visualization.widgets.dock_control import ControlDockWidget
-from visualization.widgets.dock_3d import View3DDockWidget
+from visualization.widgets.vtk_view import VTKViewDockWidget
 from visualization.widgets.panel_observer import ObserverPanel
 from visualization.widgets.scope_window import TimeScopeWindow, FrequencyScopeWindow
 from visualization.dialog_env import EnvironmentDialog
@@ -57,7 +57,7 @@ class MainWindow(QMainWindow):
         body = QHBoxLayout()
         layout.addLayout(body)
 
-        self.widget_3d = View3DDockWidget(self.params)
+        self.widget_3d = VTKViewDockWidget(self.params)
         body.addWidget(self.widget_3d, stretch=3)
 
         self.side_stack = QStackedWidget()
@@ -85,40 +85,77 @@ class MainWindow(QMainWindow):
 
     def apply_theme(self):
         self.setStyleSheet("""
-            QMainWindow { background: #f4f7fb; }
-            QLabel { color: #1f2933; }
+            QMainWindow { background: #0f172a; }
+            QLabel { color: #e2e8f0; }
             QGroupBox {
-                border: 1px solid #d7dde3;
-                border-radius: 10px;
-                margin-top: 12px;
+                border: 1px solid #223047;
+                border-radius: 12px;
+                margin-top: 14px;
                 font-weight: 600;
-                background: #ffffff;
+                background: #111827;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
-                left: 12px;
-                padding: 0 6px;
-                color: #374151;
+                left: 14px;
+                padding: 0 8px;
+                color: #94a3b8;
             }
             QPushButton {
-                background: #1f6feb;
-                color: white;
-                border-radius: 8px;
-                padding: 6px 12px;
+                background: #1d4ed8;
+                color: #f8fafc;
+                border-radius: 10px;
+                padding: 8px 14px;
+                font-weight: 600;
             }
             QPushButton:checked {
-                background: #0f4bb3;
+                background: #2563eb;
             }
             QPushButton:disabled {
-                background: #b9c0c6;
-                color: #eef1f4;
+                background: #334155;
+                color: #94a3b8;
+            }
+            QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {
+                background: #0b1220;
+                border: 1px solid #1e293b;
+                border-radius: 8px;
+                padding: 6px 8px;
+                color: #e2e8f0;
+            }
+            QTabWidget::pane {
+                border: 1px solid #1f2a44;
+                border-radius: 10px;
+                background: #0b1220;
+            }
+            QTabBar::tab {
+                background: #0f172a;
+                color: #94a3b8;
+                padding: 8px 14px;
+                border-top-left-radius: 10px;
+                border-top-right-radius: 10px;
+            }
+            QTabBar::tab:selected {
+                background: #1f2a44;
+                color: #e2e8f0;
             }
             QProgressBar {
-                border: 1px solid #d7dde3;
-                border-radius: 6px;
+                border: 1px solid #1e293b;
+                border-radius: 8px;
                 text-align: center;
+                color: #e2e8f0;
             }
-            QProgressBar::chunk { background: #46b6a1; }
+            QProgressBar::chunk { background: #38bdf8; }
+            QCheckBox { color: #e2e8f0; }
+            QSlider::groove:horizontal {
+                height: 6px;
+                background: #1e293b;
+                border-radius: 3px;
+            }
+            QSlider::handle:horizontal {
+                width: 14px;
+                background: #38bdf8;
+                margin: -4px 0;
+                border-radius: 7px;
+            }
         """)
 
     def set_mode(self, mode):
