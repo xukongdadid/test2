@@ -141,10 +141,16 @@ class VTKViewDockWidget(QWidget):
 
     def _apply_pbr(self, actor, base_color, metallic=0.05, roughness=0.4):
         prop = actor.GetProperty()
-        prop.SetInterpolationToPBR()
-        prop.SetBaseColor(*base_color)
-        prop.SetMetallic(metallic)
-        prop.SetRoughness(roughness)
+        if hasattr(prop, "SetInterpolationToPBR"):
+            prop.SetInterpolationToPBR()
+        if hasattr(prop, "SetBaseColor"):
+            prop.SetBaseColor(*base_color)
+        else:
+            prop.SetColor(*base_color)
+        if hasattr(prop, "SetMetallic"):
+            prop.SetMetallic(metallic)
+        if hasattr(prop, "SetRoughness"):
+            prop.SetRoughness(roughness)
 
     def _init_water(self):
         plane = vtkPlaneSource()
