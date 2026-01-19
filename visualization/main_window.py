@@ -40,7 +40,10 @@ class MainWindow(QMainWindow):
         self.widget_3d.sig_edit_structure.connect(self.open_structure_dialog)
         self.widget_3d.view.installEventFilter(self)
 
-        self.operator_widget = self._build_operator_view()
+        if hasattr(self, "_build_operator_view"):
+            self.operator_widget = self._build_operator_view()
+        else:
+            self.operator_widget = self._build_operator_bar()
         self.observer_widget = self._build_observer_view()
         self.observer_widget.hide()
 
@@ -238,6 +241,16 @@ class MainWindow(QMainWindow):
         if file_path:
             display_name = file_path.split("/")[-1]
             self.btn_save_file.setText(f"文件: {display_name}")
+
+    def on_save_file(self):
+        folder = QFileDialog.getExistingDirectory(self, "选择数据保存通道", self.log_base_dir)
+        if folder:
+            self.log_base_dir = folder
+            display_name = folder.rstrip("/").split("/")[-1] or folder
+            self.btn_save_file.setText(f"数据保存: {display_name}")
+
+    def on_micro_start(self):
+        self.start_simulation(self.spin_time.value(), self.spin_dt.value())
 
     def on_save_file(self):
         folder = QFileDialog.getExistingDirectory(self, "选择数据保存通道", self.log_base_dir)
