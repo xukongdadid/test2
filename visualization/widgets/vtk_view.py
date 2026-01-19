@@ -21,7 +21,7 @@ from vtkmodules.vtkRenderingCore import (
     vtkPropPicker,
 )
 from vtkmodules.vtkRenderingOpenGL2 import vtkOpenGLPolyDataMapper
-from vtkmodules.vtkRenderingCore import vtkInteractorStyleTrackballCamera
+from vtkmodules.vtkInteractionStyle import vtkInteractorStyleTrackballCamera
 from vtkmodules.vtkIOImage import vtkHDRReader, vtkPNGReader, vtkJPEGReader
 
 
