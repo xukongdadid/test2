@@ -136,6 +136,12 @@ class SystemParams:
         # 海底摩擦系数 (用于 ModelType=1), 0.0 ~ 1.0
         self.Moor_CB = 0.5
         self.Moor_ModelPath = "model/PINN_DLCAL_v1.pt"
+
+        # ==========================================
+        # 可视化资源配置 (VTK 渲染)
+        # ==========================================
+        self.Visual_TurbineModelPath = ""  # 支持 .obj / .gltf / .glb
+        self.Visual_SkyboxPath = ""        # HDRI/skybox 贴图路径 (.hdr/.png/.jpg)
         
         
         

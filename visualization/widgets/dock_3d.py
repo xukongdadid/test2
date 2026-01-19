@@ -7,6 +7,7 @@ import numpy as np
 
 class PickingGLView(gl.GLViewWidget):
     sig_items_right_clicked = Signal(list, object)
+    sig_items_double_clicked = Signal(list, object)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -46,6 +47,18 @@ class PickingGLView(gl.GLViewWidget):
             ev.accept()
             return
         super().mouseReleaseEvent(ev)
+
+    def mouseDoubleClickEvent(self, ev):
+        pos = ev.position() if hasattr(ev, "position") else ev.localPos()
+        x = int(pos.x())
+        y = int(pos.y())
+        try:
+            items = self.itemsAt((x - 3, y - 3, 6, 6))
+        except Exception:
+            items = []
+        self.sig_items_double_clicked.emit(items, pos)
+        ev.accept()
+        return
 
 class View3DDockWidget(QWidget):
     sig_frame_request = Signal(int)
@@ -113,6 +126,7 @@ class View3DDockWidget(QWidget):
         layout.addLayout(ctrl_bar)
 
         self.view.sig_items_right_clicked.connect(self.on_items_clicked)
+        self.view.sig_items_double_clicked.connect(self.on_items_double_clicked)
 
     def _create_cylinder(self, r_base, r_top, length, color, rows=12, cols=24):
         """创建中心位于原点的圆柱体"""
@@ -305,17 +319,34 @@ class View3DDockWidget(QWidget):
 
     def on_items_clicked(self, items, pos):
         self._last_click_pos = pos
+        roles = self._roles_from_items(items)
+        self._dispatch_edit_action(roles)
+
+    def on_items_double_clicked(self, items, pos):
+        self._last_click_pos = pos
+        roles = self._roles_from_items(items)
+        self._dispatch_edit_action(roles)
+
+    def _roles_from_items(self, items):
         roles = set()
         for item in items:
             role = self.item_roles.get(item)
             if role:
                 roles.add(role)
+        return roles
 
+    def _dispatch_edit_action(self, roles):
         if "wave" in roles:
             self.sig_edit_wave.emit()
             return
         if "mooring" in roles:
             self.sig_edit_mooring.emit()
+            return
+        if "structure" in roles:
+            self.sig_edit_structure.emit()
+            return
+        if "wind" in roles:
+            self.sig_edit_wind.emit()
             return
 
         alt = self._classify_by_ray(self._last_click_pos)
@@ -331,11 +362,7 @@ class View3DDockWidget(QWidget):
         if alt == "wind":
             self.sig_edit_wind.emit()
             return
-
-        if "structure" in roles:
-            self.sig_edit_structure.emit()
-        else:
-            self.sig_edit_wind.emit()
+        self.sig_edit_wind.emit()
 
     def _classify_by_ray(self, pos):
         if pos is None:
