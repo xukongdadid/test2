@@ -1,7 +1,7 @@
 import os
 import numpy as np
 from PySide6.QtCore import Qt, Signal, QEvent
-from PySide6.QtWidgets import QWidget, QVBoxLayout
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QSlider, QCheckBox, QLabel
 from vtkmodules.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 from vtkmodules.vtkCommonTransforms import vtkTransform
 from vtkmodules.vtkFiltersSources import (
@@ -51,6 +51,7 @@ class VTKViewDockWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         self.vtk_widget = QVTKRenderWindowInteractor(self)
         layout.addWidget(self.vtk_widget)
+        self._build_timeline_controls(layout)
 
         self.renderer = vtkRenderer()
         self.render_window = self.vtk_widget.GetRenderWindow()
@@ -62,6 +63,21 @@ class VTKViewDockWidget(QWidget):
         self._init_scene()
         self._init_visual_state()
         self.interactor.Initialize()
+
+    def _build_timeline_controls(self, layout):
+        ctrl_bar = QHBoxLayout()
+        ctrl_bar.setContentsMargins(5, 5, 5, 5)
+        self.chk_sync = QCheckBox("Live Sync")
+        self.chk_sync.setChecked(True)
+        self.lbl_time = QLabel("T: 0.00s")
+        self.lbl_time.setFixedWidth(70)
+        self.slider = QSlider(Qt.Horizontal)
+        self.slider.setRange(0, 0)
+        self.slider.valueChanged.connect(self.on_slider_changed)
+        ctrl_bar.addWidget(self.chk_sync)
+        ctrl_bar.addWidget(self.lbl_time)
+        ctrl_bar.addWidget(self.slider)
+        layout.addLayout(ctrl_bar)
 
     def eventFilter(self, obj, event):
         if obj is self.vtk_widget and event.type() == QEvent.MouseButtonDblClick:
@@ -349,6 +365,18 @@ class VTKViewDockWidget(QWidget):
             self._wind_source.SetPoint1(0, -140, 60)
             self._wind_source.SetPoint2(scale, -140, 60)
         self.render_window.Render()
+
+    def on_slider_changed(self, val):
+        if not self.chk_sync.isChecked():
+            self.sig_frame_request.emit(val)
+
+    def update_timeline(self, total, curr):
+        self.slider.setMaximum(max(0, total - 1))
+        if self.chk_sync.isChecked():
+            self.slider.blockSignals(True)
+            self.slider.setValue(max(0, total - 1))
+            self.slider.blockSignals(False)
+        self.lbl_time.setText(f"T: {curr:.2f}s")
 
     def apply_params(self, params):
         self.params = params
