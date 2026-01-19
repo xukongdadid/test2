@@ -1,7 +1,6 @@
 from PySide6.QtWidgets import (QMainWindow, QMessageBox, QWidget, QVBoxLayout,
-                               QHBoxLayout, QComboBox, QSplitter)
-from PySide6.QtCore import Qt, Slot
-from PySide6.QtGui import QAction
+                               QHBoxLayout, QFrame, QPushButton, QFileDialog)
+from PySide6.QtCore import Slot
 
 from config.fast_params import SystemParams
 from solver.worker import SimulationWorker
@@ -31,33 +30,7 @@ class MainWindow(QMainWindow):
     def init_layout(self):
         central = QWidget()
         main_layout = QVBoxLayout(central)
-
-        mode_bar = QHBoxLayout()
-        self.mode_selector = QComboBox()
-        self.mode_selector.addItems(["Operator Mode", "Observer Mode"])
-        self.mode_selector.currentIndexChanged.connect(self.on_mode_changed)
-        mode_bar.addWidget(self.mode_selector)
-        mode_bar.addStretch()
-        main_layout.addLayout(mode_bar)
-
-        self.stack = QWidget()
-        stack_layout = QVBoxLayout(self.stack)
-        self.stack_layout = stack_layout
-
-        self.operator_widget = self._build_operator_view()
-        self.observer_widget = self._build_observer_view()
-
-        stack_layout.addWidget(self.operator_widget)
-        stack_layout.addWidget(self.observer_widget)
-        self.observer_widget.hide()
-        main_layout.addWidget(self.stack)
-
-        self.setCentralWidget(central)
-
-    def _build_operator_view(self):
-        container = QWidget()
-        layout = QHBoxLayout(container)
-        splitter = QSplitter(Qt.Horizontal)
+        main_layout.setContentsMargins(8, 8, 8, 8)
 
         self.widget_3d = View3DDockWidget(self.params)
         self.widget_3d.sig_frame_request.connect(self.on_3d_frame_request)
@@ -66,21 +39,31 @@ class MainWindow(QMainWindow):
         self.widget_3d.sig_edit_mooring.connect(self.open_mooring_dialog)
         self.widget_3d.sig_edit_structure.connect(self.open_structure_dialog)
 
-        right_panel = QWidget()
-        right_layout = QVBoxLayout(right_panel)
+        main_layout.addWidget(self.widget_3d, stretch=7)
+
+        bottom_bar = self._build_bottom_bar()
+        main_layout.addWidget(bottom_bar, stretch=3)
+
+        self.setCentralWidget(central)
+
+    def _build_bottom_bar(self):
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        layout.setSpacing(16)
+        layout.setContentsMargins(0, 8, 0, 0)
+
         self.widget_ctrl = ControlDockWidget()
         self.widget_scope = ScopeDockWidget()
         self.live_panel = LiveDataPanel()
 
-        right_layout.addWidget(self.widget_ctrl)
-        right_layout.addWidget(self.live_panel)
-        right_layout.addWidget(self.widget_scope)
+        operator_panel = self._wrap_cyber_panel([self.widget_ctrl, self.live_panel, self.widget_scope])
+        menu_panel = self._build_menu_panel()
+        self.observer_panel = ObserverPanel()
+        observer_panel = self._wrap_cyber_panel([self.observer_panel])
 
-        splitter.addWidget(self.widget_3d)
-        splitter.addWidget(right_panel)
-        splitter.setStretchFactor(0, 3)
-        splitter.setStretchFactor(1, 2)
-        layout.addWidget(splitter)
+        layout.addWidget(operator_panel, stretch=4)
+        layout.addWidget(menu_panel, stretch=2)
+        layout.addWidget(observer_panel, stretch=4)
 
         self.widget_ctrl.sig_start_sim.connect(self.start_simulation)
         self.widget_ctrl.sig_stop_sim.connect(self.stop_simulation)
@@ -89,20 +72,57 @@ class MainWindow(QMainWindow):
 
         return container
 
-    def _build_observer_view(self):
-        container = QWidget()
-        layout = QHBoxLayout(container)
-        splitter = QSplitter(Qt.Horizontal)
+    def _wrap_cyber_panel(self, widgets):
+        frame = QFrame()
+        frame.setFrameShape(QFrame.StyledPanel)
+        frame.setStyleSheet(
+            "QFrame {"
+            "background-color: #0b0f1a;"
+            "border: 1px solid #19d3ff;"
+            "border-radius: 8px;"
+            "}"
+        )
+        layout = QVBoxLayout(frame)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(8)
+        for widget in widgets:
+            layout.addWidget(widget)
+        return frame
 
-        self.observer_3d = View3DDockWidget(self.params)
-        self.observer_panel = ObserverPanel()
-
-        splitter.addWidget(self.observer_3d)
-        splitter.addWidget(self.observer_panel)
-        splitter.setStretchFactor(0, 2)
-        splitter.setStretchFactor(1, 3)
-        layout.addWidget(splitter)
-        return container
+    def _build_menu_panel(self):
+        frame = QFrame()
+        frame.setFrameShape(QFrame.StyledPanel)
+        frame.setStyleSheet(
+            "QFrame {"
+            "background-color: #070b14;"
+            "border: 1px solid #7cf4ff;"
+            "border-radius: 10px;"
+            "}"
+            "QPushButton {"
+            "color: #d7faff;"
+            "background-color: #0f1c2c;"
+            "border: 1px solid #19d3ff;"
+            "border-radius: 6px;"
+            "padding: 10px 14px;"
+            "font-weight: 600;"
+            "}"
+            "QPushButton:hover {"
+            "background-color: #12304a;"
+            "}"
+        )
+        layout = QVBoxLayout(frame)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(12)
+        layout.addStretch()
+        self.btn_save_file = QPushButton("保存文件")
+        self.btn_power = QPushButton("实施功率: 0.00 MW")
+        self.btn_runtime = QPushButton("运行时间: 0.00 s")
+        self.btn_save_file.clicked.connect(self.on_save_file)
+        layout.addWidget(self.btn_save_file)
+        layout.addWidget(self.btn_power)
+        layout.addWidget(self.btn_runtime)
+        layout.addStretch()
+        return frame
 
     def init_menu(self):
         menu = self.menuBar()
@@ -119,7 +139,12 @@ class MainWindow(QMainWindow):
         if dlg.exec():
             self.params = dlg.get_params()
             self.widget_3d.params = self.params
-            self.observer_3d.params = self.params
+
+    def on_save_file(self):
+        file_path, _ = QFileDialog.getSaveFileName(self, "保存文件", "", "Log Files (*.csv *.txt);;All Files (*)")
+        if file_path:
+            display_name = file_path.split("/")[-1]
+            self.btn_save_file.setText(f"文件: {display_name}")
 
     def start_simulation(self, t_total, dt):
         self.widget_ctrl.btn_run.setEnabled(False)
@@ -150,24 +175,22 @@ class MainWindow(QMainWindow):
         # 2. Update 3D View
         total_frames = len(self.data_history)
         self.widget_3d.update_timeline(total_frames, data['time'])
-        self.observer_3d.update_timeline(total_frames, data['time'])
 
         if self.widget_3d.chk_sync.isChecked():
             self._update_3d_view(data)
-        if self.observer_3d.chk_sync.isChecked():
-            self._update_3d_view(data, target=self.observer_3d)
 
         # 3. Update Power Label (Use updated key: env_GenPower)
         pwr = data.get('env_GenPower', data.get('GenPwr', 0.0))
         p_mw = pwr / 1e6
         self.widget_ctrl.lbl_power.setText(f"Power: {p_mw:.2f} MW")
+        self.btn_power.setText(f"实施功率: {p_mw:.2f} MW")
+        self.btn_runtime.setText(f"运行时间: {data['time']:.2f} s")
 
         self.observer_panel.update_data(data)
-        if self.observer_widget.isVisible():
-            channels = sorted(data.keys())
-            self.observer_panel.set_available_channels(channels)
+        channels = sorted(data.keys())
+        self.observer_panel.set_available_channels(channels)
 
-    def _update_3d_view(self, data, target=None):
+    def _update_3d_view(self, data):
         """Map new dof_ keys to 3D view"""
         state_rigid = [
             data.get('dof_Surge', 0),
@@ -177,8 +200,7 @@ class MainWindow(QMainWindow):
             data.get('dof_Pitch', 0),
             data.get('dof_Yaw', 0)
         ]
-        view = target or self.widget_3d
-        view.update_pose(state_rigid, data['time'])
+        self.widget_3d.update_pose(state_rigid, data['time'])
 
     @Slot(int)
     def on_3d_frame_request(self, idx):
@@ -197,16 +219,6 @@ class MainWindow(QMainWindow):
         log_path = getattr(self.worker, 'log_dir', 'Unknown')
         QMessageBox.information(self, "Simulation Finished",
                                 f"Simulation Completed.\nData saved to:\n{log_path}")
-
-    def on_mode_changed(self, idx):
-        if idx == 0:
-            self.operator_widget.show()
-            self.observer_widget.hide()
-        else:
-            self.operator_widget.hide()
-            self.observer_widget.show()
-            channels = sorted({k for entry in self.data_history for k in entry.keys()})
-            self.observer_panel.set_available_channels(channels)
 
     def open_wind_dialog(self):
         dlg = WindDialog(self.params, self)
