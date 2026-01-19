@@ -161,6 +161,20 @@ class MooringSystem:
             except Exception as e:
                 print(f"Error loading MoorEmm: {e}. Falling back to Simple.")
                 self.solver = InternalSimpleMooring(params, seastate, dt)
+                
+        elif self.model_type == 4:
+            # 4: PINN-DACLA (AI Model)
+            try:
+                from .pinn_wrapper import PINNMooringWrapper
+                self.solver = PINNMooringWrapper(params, seastate, dt)
+                print("PINN Solver initialized successfully.")
+            except Exception as e:
+                import traceback
+                print(f"Error loading PINN Solver: {e}")
+                print(traceback.format_exc())
+                print("Falling back to Simple.")
+                self.solver = InternalSimpleMooring(params, seastate, dt)
+        # === 新增部分 END ===
         
         else:
             self.solver = InternalSimpleMooring(params, seastate, dt)

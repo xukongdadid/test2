@@ -172,7 +172,8 @@ class EnvironmentDialog(QDialog):
             "0: Simple Solver (Original)",
             "1: MAP++ Catenary (Bottom Contact)",
             "2: MoorDyn (External C++)",
-            "3: MoorEmm (Python Lumped Mass)"  # <--- 新增
+            "3: MoorEmm (Python Lumped Mass)",
+            "4: AImoor"  # <--- 新增
         ])
 
         self.combo_moor_model.currentIndexChanged.connect(self.on_moor_model_changed)

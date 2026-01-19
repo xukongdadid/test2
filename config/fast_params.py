@@ -62,56 +62,82 @@ class SystemParams:
 
         # ==========================================
         # 系泊系统参数配置 (Mooring System Configuration)
+        # 数据来源: moordyn.dat
         # ==========================================
+        
         # --- 1. 基础几何与结构参数 (Basic Geometry & Structure) ---
-        self.Moor_NumLines = 3  # [数量] 系泊缆索的总根数 (通常为3根,呈120度对称分布)
-        self.Moor_LineLength = 850  # [m]   缆索的无应力原长 (Unstretched Length, L0)
-        self.Moor_LineMass = 685  # [kg/m] 缆索的线性密度 (干质量/单位长度), 用于计算重力与惯性
-        self.Moor_LineEA = 3.27e9  # [N]   轴向拉伸刚度 (Axial Stiffness, E*A), 决定缆索弹性
+        self.Moor_NumLines = 3          # [数量] Line 1, 2, 3
+        self.Moor_LineLength = 835.35   # [m] UnstrLen (无应力原长)
+        self.Moor_LineMass = 113.35     # [kg/m] MassDen (线性密度)
+        self.Moor_LineEA = 7.536e8      # [N] EA (轴向刚度)
+
         # --- 2. 水动力与截面参数 (Hydrodynamics & Cross-section) ---
-        # [重要] 显式定义这些参数以覆盖 MoorEmmSolver 中的默认值
-        self.Moor_LineDiam = 0.333  # [m]   缆索等效直径 (d). 用于计算浮力(体积)和水动力(面积)
-        self.Moor_Cdn = 2  # [-]   法向拖曳系数 (Normal Drag Coeff, C_dn). 垂直于缆索的水流阻力
-        self.Moor_Cdt = 0.4  # [-]   切向拖曳系数 (Tangential Drag Coeff, C_dt). 沿缆索表面的摩擦阻力
-        self.Moor_Can = 0.82  # [-]   法向附加质量系数 (Added Mass Coeff, C_an). 也就是 Cm - 1
-        self.Moor_Cat = 0.27  # [-]   (可选) 切向附加质量系数. 链条通常非0, 钢丝绳通常为0. 若不写默认为0.269(链条)
-        self.Moor_Cint = 1.0e8  # [N*s/m^2] 缆索内部阻尼系数 (Internal Damping Coeff)
+        self.Moor_LineDiam = 0.0766     # [m] Diam (直径)
+        
+        # 拖曳系数 (Drag Coefficients)
+        self.Moor_Cdn = 2.0             # [-] Cd (横向/法向拖曳系数)
+        self.Moor_Cdt = 0.4             # [-] CdAx (切向/轴向拖曳系数)
+        
+        # 附加质量系数 (Added Mass Coefficients)
+        self.Moor_Can = 0.8             # [-] Ca (横向/法向附加质量)
+        self.Moor_Cat = 0.25            # [-] CaAx (切向/轴向附加质量)
+        
+        # 内部阻尼 (Internal Damping)
+        # 注: moordyn.dat 中为 BA/-zeta = -1.0 (表示临界阻尼比), 
+        # 但 MoorEmm 需要物理阻尼值 [N*s]. 
+        # 对于较轻的 OC4 链条，1.0e8 过大，这里调整为 1.0e6 以避免刚性过大。
+        self.Moor_Cint = 1.0e6          # [N*s] (估算值)
+
         # --- 3. 海床接触参数 (Seabed Contact) ---
-        # 基于 Hall & Goupee (2015) Eq. 12 的接触模型
-        self.Moor_Kb = 3.0e6  # [Pa/m] 或 [N/m^3] 海床垂直刚度 (Stiffness per unit area). 决定海床有多"硬"
-        self.Moor_Cb = 3.0e5  # [Pa*s/m] 海床阻尼系数. 用于防止触底时的剧烈反弹 (如果不设置，代码通常有默认值)
+        # 对应 moordyn.dat 中的 SOLVER OPTIONS
+        self.Moor_Kb = 3.0e6            # [Pa/m] kbot (海床刚度)
+        self.Moor_Cb = 3.0e5            # [Pa*s/m] cbot (海床阻尼)
+        self.Moor_Fric_Mu_kT = 0      # [-] 动摩擦系数 (横向)
+        self.Moor_Fric_Mu_kA = 0      # [-] 动摩擦系数 (轴向)
+        self.Moor_Mc = 1              # 静摩擦/动摩擦比率
+        self.Moor_Fric_Mu_sT = self.Moor_Fric_Mu_kT * self.Moor_Mc      # [-] 静摩擦系数 (横向)
+        self.Moor_Fric_Mu_sA = self.Moor_Fric_Mu_kA * self.Moor_Mc      # [-] 静摩擦系数 (轴向)
+        self.Moor_Fric_Cv = 1000.0      # [-] 摩擦线性区斜率参数
 
         # --- 3.5 离散化与求解设置 (Discretization & Solver Settings) ---
-        self.Moor_NumSegs = 20  # [-]   每根系泊线的离散节段数
-        self.Moor_MaxDt = 0.00125  # [s]   物理子步最大步长上限
-        self.Moor_SubstepSafety = 0.8  # [-]   稳定性安全系数 (用于临界步长)
-        self.Moor_FallbackDt = 0.001  # [s]   无法计算临界步长时的回退步长
+        self.Moor_NumSegs = 20          # [-] NumSegs (分段数)
+        self.Moor_MaxDt = 0.001         # [s] dtM (物理求解最大步长)
+        self.Moor_SubstepSafety = 0.8   # [-] 稳定性安全系数
+        self.Moor_FallbackDt = 0.0005   # [s] 回退步长
 
         # --- 4. 导缆孔与锚点位置 (Fairlead & Anchor Geometry) ---
-        # 自定义导缆孔/锚点坐标 (必填)
-        # - 导缆孔坐标为平台局部坐标系 (平台初始原点/姿态)
-        # - 锚点坐标为全局坐标系 (海床固定)
-        # - 列表长度需一致，且可与 Moor_NumLines 不同，求解器将以列表长度为准
-        self.Moor_FairleadPoints = [[-58.0, 0.0, -14.0], [29.0, 50.229, -14.0], [29.0, -50.229, -14.0]]
-        self.Moor_AnchorPoints = [[-837.6, 0.0, -200.0], [418.8, 725.383, -200.0], [418.8, -725.383, -200.0]]
+        # 数据来源: moordyn.dat "POINTS" 表
+        # Line 1 连接 Anchor 1 和 Fairlead 4
+        # Line 2 连接 Anchor 2 和 Fairlead 5
+        # Line 3 连接 Anchor 3 和 Fairlead 6
+        
+        # 导缆孔坐标 (Vessel, 局部坐标)
+        # [Line1_Fair(Node4), Line2_Fair(Node5), Line3_Fair(Node6)]
+        self.Moor_FairleadPoints = [
+            [ 20.434,  35.393, -14.0],  # Node 4
+            [-40.868,   0.000, -14.0],  # Node 5
+            [ 20.434, -35.393, -14.0]   # Node 6
+        ]
+        
+        # 锚点坐标 (Fixed, 全局坐标)
+        # [Line1_Anch(Node1), Line2_Anch(Node2), Line3_Anch(Node3)]
+        self.Moor_AnchorPoints = [
+            [ 418.8,  725.383, -200.0], # Node 1
+            [-837.6,    0.000, -200.0], # Node 2
+            [ 418.8, -725.383, -200.0]  # Node 3
+        ]
         self.Moor_DragCoeff = 1.1
-        # === 向后兼容 MoorEmmSolver 的“半径 + 吃水/水深”接口 ===
-        # 导缆孔半径：按给定导缆孔坐标的水平距离取平均
-        fair_r = [np.hypot(p[0], p[1]) for p in self.Moor_FairleadPoints]
-        self.Moor_FairleadRadius = float(np.mean(fair_r))
-        # 给的 z 是负的高度，吃水是正值
-        self.Moor_FairleadDraft = -float(self.Moor_FairleadPoints[0][2])
-
-        # 锚点半径 / 水深：同样从锚点坐标推回去
-        anch_r = [np.hypot(p[0], p[1]) for p in self.Moor_AnchorPoints]
-        self.Moor_AnchorRadius = float(np.mean(anch_r))
-        self.Moor_AnchorDepth  = -float(self.Moor_AnchorPoints[0][2])
-
         # --- 5. 初始系泊模型选择 ---
         # 0 = Original Simple Solver (Quasi-static)
-        # 1 = External Catenary / MAP++
+        # 1 = External Catenary / MAP++ 
         # 2 = MoorDyn (Dynamic Lumped-Mass, C++)
         # 3 = MoorEmm (Dynamic Lumped-Mass, Python Native)
         self.Moor_ModelType = 0
         # 海底摩擦系数 (用于 ModelType=1), 0.0 ~ 1.0
         self.Moor_CB = 0.5
+        self.Moor_ModelPath = "model/PINN_DLCAL_v1.pt"
+        
+        
+        
+        self.Init_Surge = 15.0  # 给 15米的初始偏移
+        self.Init_Pitch = 5.0  # 或者给 5度的初始倾角
