@@ -152,6 +152,22 @@ class View3DDockWidget(QWidget):
     def init_scene(self):
         axis = gl.GLAxisItem(); axis.setSize(30, 30, 30); self.view.addItem(axis)
 
+        # --- 0. Scene References ---
+        sea_grid = gl.GLGridItem()
+        sea_grid.setSize(600, 600)
+        sea_grid.setSpacing(50, 50)
+        sea_grid.setColor(QColor(255, 255, 255, 60))
+        self.view.addItem(sea_grid)
+        self.sea_grid = sea_grid
+
+        seabed_grid = gl.GLGridItem()
+        seabed_grid.setSize(800, 800)
+        seabed_grid.setSpacing(50, 50)
+        seabed_grid.setColor(QColor(30, 50, 70, 120))
+        seabed_grid.translate(0, 0, -self.params.WaterDepth)
+        self.view.addItem(seabed_grid)
+        self.seabed_grid = seabed_grid
+
         # --- 1. Platform ---
         self.plat_parts = []
 
@@ -223,6 +239,8 @@ class View3DDockWidget(QWidget):
         self.wave_X, self.wave_Y = np.meshgrid(self.wave_x, self.wave_y)
         self.wave = gl.GLSurfacePlotItem(x=self.wave_x, y=self.wave_y, z=np.zeros_like(self.wave_X), shader='shaded', computeNormals=True, smooth=True)
         self.view.addItem(self.wave)
+
+        self.update_pose(np.zeros(6), 0.0)
 
     def on_slider_changed(self, val):
         if not self.chk_sync.isChecked(): self.sig_frame_request.emit(val)
