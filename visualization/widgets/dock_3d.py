@@ -205,6 +205,7 @@ class View3DDockWidget(QWidget):
         self.sky_dome = gl.GLMeshItem(meshdata=sky_md, smooth=True, vertexColors=np.array(sky_cols))
         self.sky_dome.setGLOptions("translucent")
         self.view.addItem(self.sky_dome)
+        self.item_roles[self.sky_dome] = "wind"
 
         # --- 1. Platform ---
         self.plat_parts = []
