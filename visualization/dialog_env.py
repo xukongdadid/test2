@@ -5,7 +5,7 @@ from PySide6.QtCore import Qt
 
 
 class EnvironmentDialog(QDialog):
-    def __init__(self, current_params, parent=None):
+    def __init__(self, current_params, parent=None, initial_tab=None):
         super().__init__(parent)
         self.setWindowTitle("LabFAST V0.0.1 Environment Config")
         self.resize(600, 500)
@@ -33,6 +33,8 @@ class EnvironmentDialog(QDialog):
         self.layout.addLayout(btn_layout)
 
         self.load_params()
+        if initial_tab:
+            self.open_tab(initial_tab)
 
     def init_wind_tab(self):
         self.tab_wind = QWidget()
@@ -266,3 +268,17 @@ class EnvironmentDialog(QDialog):
         self.params.Moor_CB = self.spin_moor_cb.value()
 
         return self.params
+
+    def open_tab(self, tab_name):
+        tab_map = {
+            "wind": self.tab_wind,
+            "wave": self.tab_wave,
+            "current": self.tab_curr,
+            "hydro": self.tab_hydro,
+            "mooring": self.tab_moor,
+        }
+        widget = tab_map.get(tab_name)
+        if widget:
+            idx = self.tabs.indexOf(widget)
+            if idx >= 0:
+                self.tabs.setCurrentIndex(idx)

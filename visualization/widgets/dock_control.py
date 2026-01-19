@@ -1,9 +1,10 @@
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QPushButton, QLabel,
                                QProgressBar, QGroupBox, QTreeWidget, QTreeWidgetItem,
                                QDoubleSpinBox, QFormLayout, QComboBox, QHBoxLayout,
-                               QCheckBox)
+                               QDialog, QDialogButtonBox, QToolButton, QMenu)
 from PySide6.QtCore import Signal, Qt
 from PySide6.QtWidgets import QTreeWidgetItemIterator
+from visualization.save_config import SAVE_GROUPS, default_save_config
 
 # --- [V3.1] 22-DOF Full Channel Config ---
 CHANNEL_CONFIG = {
@@ -37,7 +38,6 @@ CHANNEL_CONFIG = {
     "Environment": {
         "Wind Speed (m/s)": "env_wind_speed",
         "Wave Elevation (m)": "env_wave_elev",
-        "Current Speed (m/s)": "env_current_speed",
         "Thrust (N)": "thrust", "Gen Torque (Nm)": "gen_torque"
     }
 }
@@ -47,10 +47,13 @@ class ControlDockWidget(QWidget):
     sig_stop_sim = Signal()
     sig_open_env = Signal()
     sig_channels_changed = Signal(list, list) 
+    sig_save_config_changed = Signal(dict)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, show_channels=False, show_env_button=False):
         super().__init__(parent)
         self.layout = QVBoxLayout(self)
+        self.show_channels = show_channels
+        self.show_env_button = show_env_button
         
         # --- Simulation Control ---
         grp_sim = QGroupBox("Simulation Control")
@@ -67,7 +70,9 @@ class ControlDockWidget(QWidget):
         self.btn_run = QPushButton("Start"); self.btn_run.clicked.connect(self.on_start_clicked)
         self.btn_stop = QPushButton("Stop"); self.btn_stop.setEnabled(False); self.btn_stop.clicked.connect(self.sig_stop_sim.emit)
         self.btn_env = QPushButton("Env..."); self.btn_env.clicked.connect(self.sig_open_env.emit)
-        btn_layout.addWidget(self.btn_run); btn_layout.addWidget(self.btn_stop); btn_layout.addWidget(self.btn_env)
+        btn_layout.addWidget(self.btn_run); btn_layout.addWidget(self.btn_stop)
+        if self.show_env_button:
+            btn_layout.addWidget(self.btn_env)
         layout_sim.addLayout(btn_layout)
         
         # Progress Bar
@@ -84,36 +89,60 @@ class ControlDockWidget(QWidget):
         self.lbl_power.setAlignment(Qt.AlignCenter)
         self.lbl_power.setStyleSheet("font-weight: bold; font-size: 14px; color: #4CAF50;")
         layout_sim.addWidget(self.lbl_power)
+
+        # Live Telemetry
+        grp_tel = QGroupBox("Live Telemetry")
+        layout_tel = QVBoxLayout()
+        self.lbl_dof = QLabel("DOF: Surge 0.00 | Sway 0.00 | Heave 0.00")
+        self.lbl_env = QLabel("Env: Wind 0.0 m/s | Wave 0.0 m")
+        self.lbl_moor = QLabel("Moor: Fx 0.0 | Fy 0.0 | Fz 0.0")
+        layout_tel.addWidget(self.lbl_dof)
+        layout_tel.addWidget(self.lbl_env)
+        layout_tel.addWidget(self.lbl_moor)
+        grp_tel.setLayout(layout_tel)
+        self.layout.addWidget(grp_tel)
         
         grp_sim.setLayout(layout_sim)
         self.layout.addWidget(grp_sim)
+        
+        # --- 22-DOF Channels (Optional) ---
+        self.tree = None
+        if self.show_channels:
+            grp_chan = QGroupBox("22-DOF Output Selection")
+            layout_chan = QVBoxLayout()
+            self.tree = QTreeWidget()
+            self.tree.setHeaderLabels(["Channel", "Color", "Style"])
+            self.tree.setColumnWidth(0, 200)
+            self.tree.itemChanged.connect(self.on_item_changed)
+            layout_chan.addWidget(self.tree)
+            grp_chan.setLayout(layout_chan)
+            self.layout.addWidget(grp_chan)
 
-        # --- Logging Selection ---
-        grp_log = QGroupBox("Data Logging (CSV)")
-        layout_log = QVBoxLayout()
-        self.chk_log_dof = QCheckBox("Structure DOF")
-        self.chk_log_hydro = QCheckBox("Wave/Current Loads (Hydro)")
-        self.chk_log_wind = QCheckBox("Wind/Aero Loads")
-        self.chk_log_moor = QCheckBox("Mooring Loads")
-        for chk in (self.chk_log_dof, self.chk_log_hydro, self.chk_log_wind, self.chk_log_moor):
-            chk.setChecked(True)
-            layout_log.addWidget(chk)
-        grp_log.setLayout(layout_log)
-        self.layout.addWidget(grp_log)
-        
-        # --- 22-DOF Channels ---
-        grp_chan = QGroupBox("22-DOF Output Selection")
-        layout_chan = QVBoxLayout()
-        self.tree = QTreeWidget()
-        self.tree.setHeaderLabels(["Channel", "Color", "Style"])
-        self.tree.setColumnWidth(0, 200)
-        self.tree.itemChanged.connect(self.on_item_changed)
-        layout_chan.addWidget(self.tree)
-        grp_chan.setLayout(layout_chan)
-        self.layout.addWidget(grp_chan)
-        
-        self._init_tree()
-        self.selected_keys = []
+            self._init_tree()
+            self.selected_keys = []
+
+        # --- Data Save Selection ---
+        grp_save = QGroupBox("Data Save")
+        layout_save = QHBoxLayout()
+        self.btn_save_cfg = QToolButton()
+        self.btn_save_cfg.setText("Save Channels")
+        self.btn_save_cfg.setPopupMode(QToolButton.InstantPopup)
+        save_menu = QMenu(self.btn_save_cfg)
+        act_cfg = save_menu.addAction("Configure...")
+        act_reset = save_menu.addAction("Reset Default")
+        act_cfg.triggered.connect(self.open_save_dialog)
+        act_reset.triggered.connect(self.reset_save_config)
+        self.btn_save_cfg.setMenu(save_menu)
+        self.lbl_save_hint = QLabel("Default: all groups")
+        self.lbl_save_hint.setStyleSheet("color: #7a7a7a;")
+        layout_save.addWidget(self.btn_save_cfg)
+        layout_save.addWidget(self.lbl_save_hint)
+        layout_save.addStretch()
+        grp_save.setLayout(layout_save)
+        self.layout.addWidget(grp_save)
+
+        self.save_config = default_save_config()
+        self.layout.addStretch()
 
     def _init_tree(self):
         self.tree.clear()
@@ -143,6 +172,8 @@ class ControlDockWidget(QWidget):
         self.sig_start_sim.emit(self.spin_time.value(), self.spin_dt.value())
 
     def on_item_changed(self, item, col):
+        if not self.tree:
+            return
         channels = []
         it = QTreeWidgetItemIterator(self.tree)
         while it.value():
@@ -154,16 +185,80 @@ class ControlDockWidget(QWidget):
                 channels.append({'key': key, 'name': item.text(0), 'color': color, 'style': 'Solid'})
             it += 1
         self.sig_channels_changed.emit(channels, []) 
+
+    def open_save_dialog(self):
+        dlg = DataSaveDialog(self.save_config, self)
+        if dlg.exec():
+            self.save_config = dlg.get_selection()
+            picked = sum(len(v) for v in self.save_config.values())
+            self.lbl_save_hint.setText(f"Selected fields: {picked}")
+            self.sig_save_config_changed.emit(self.save_config)
+
+    def reset_save_config(self):
+        self.save_config = default_save_config()
+        self.lbl_save_hint.setText("Default: all groups")
+        self.sig_save_config_changed.emit(self.save_config)
     
     def update_progress(self, percent, elapsed_sec):
         self.progress.setValue(int(percent))
         mins, secs = divmod(int(elapsed_sec), 60)
         self.lbl_timer.setText(f"Elapsed: {mins:02d}:{secs:02d}")
 
-    def get_log_config(self):
-        return {
-            "save_dof": self.chk_log_dof.isChecked(),
-            "save_hydro": self.chk_log_hydro.isChecked(),
-            "save_wind_aero": self.chk_log_wind.isChecked(),
-            "save_moor": self.chk_log_moor.isChecked(),
-        }
+    def update_telemetry(self, data):
+        surge = data.get("dof_Surge", 0.0)
+        sway = data.get("dof_Sway", 0.0)
+        heave = data.get("dof_Heave", 0.0)
+        wind = data.get("env_wind_speed", data.get("WindSpeed", 0.0))
+        wave = data.get("env_wave_elev", data.get("WaveElev", 0.0))
+        moor_fx = data.get("MoorFx", 0.0)
+        moor_fy = data.get("MoorFy", 0.0)
+        moor_fz = data.get("MoorFz", 0.0)
+        self.lbl_dof.setText(f"DOF: Surge {surge:.2f} | Sway {sway:.2f} | Heave {heave:.2f}")
+        self.lbl_env.setText(f"Env: Wind {wind:.2f} m/s | Wave {wave:.2f} m")
+        self.lbl_moor.setText(f"Moor: Fx {moor_fx:.2f} | Fy {moor_fy:.2f} | Fz {moor_fz:.2f}")
+
+
+class DataSaveDialog(QDialog):
+    def __init__(self, current_config, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Data Save Configuration")
+        self.resize(420, 420)
+        self.layout = QVBoxLayout(self)
+
+        self.tree = QTreeWidget()
+        self.tree.setHeaderLabels(["Group / Field"])
+        self.layout.addWidget(self.tree)
+
+        self._populate_tree(current_config)
+        self.tree.expandAll()
+
+        btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        btns.accepted.connect(self.accept)
+        btns.rejected.connect(self.reject)
+        self.layout.addWidget(btns)
+
+    def _populate_tree(self, current_config):
+        self.tree.clear()
+        for group, fields in SAVE_GROUPS.items():
+            g_item = QTreeWidgetItem(self.tree)
+            g_item.setText(0, group)
+            g_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable)
+            selected_fields = set(current_config.get(group, []))
+            g_item.setCheckState(0, Qt.Checked if selected_fields else Qt.Unchecked)
+            for field in fields:
+                f_item = QTreeWidgetItem(g_item)
+                f_item.setText(0, field)
+                f_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable)
+                f_item.setCheckState(0, Qt.Checked if field in selected_fields else Qt.Unchecked)
+
+    def get_selection(self):
+        selection = {group: [] for group in SAVE_GROUPS.keys()}
+        root = self.tree.invisibleRootItem()
+        for i in range(root.childCount()):
+            g_item = root.child(i)
+            group = g_item.text(0)
+            for j in range(g_item.childCount()):
+                f_item = g_item.child(j)
+                if f_item.checkState(0) == Qt.Checked:
+                    selection[group].append(f_item.text(0))
+        return selection

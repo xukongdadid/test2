@@ -12,7 +12,6 @@ from physics.inflow import InflowManager
 from physics.seastate import SeaState
 from control.controller_interface import ControllerInterface
 from solver.state_adapter import StateAdapter, AdapterConfig
-from solver.data_logger import RunDataLogger, LogConfig
 
 
 class SimulationWorker(QThread):
@@ -21,7 +20,7 @@ class SimulationWorker(QThread):
     finished_signal = Signal()
     error_signal = Signal(str)
 
-    def __init__(self, params, t_total, dt, ui_fps=30, out_fps=20, log_config=None, log_base_dir="."):
+    def __init__(self, params, t_total, dt, ui_fps=30, out_fps=20):
         """
         ui_fps : UI 刷新最大帧率（降低卡顿）
         out_fps: 输出/日志写入的最大帧率（对标 OpenFAST 的 OutDec/采样思想）
@@ -34,9 +33,6 @@ class SimulationWorker(QThread):
         self.running = True
         self.paused = False
         self.version = "0.0.1"
-        self.log_config = log_config or LogConfig()
-        self.log_base_dir = log_base_dir
-        self.log_dir = None
 
         # ---------------------------
         # 节流：计算高频，UI低频
@@ -52,7 +48,6 @@ class SimulationWorker(QThread):
         self.log_cache = {}
 
     def run(self):
-        data_logger = None
         try:
             dt = self.dt
             t = 0.0
@@ -87,9 +82,6 @@ class SimulationWorker(QThread):
             print(f"Simulation V{self.version} started. Solver: Adams-Bashforth-Moulton 4.")
             adapter = StateAdapter(AdapterConfig(angles_are_rad=True))
             wall_start = time.time()
-
-            data_logger = RunDataLogger(self.log_base_dir, self.log_config)
-            self.log_dir = data_logger.run_dir
 
             # 为避免闭包里引用外层 t 造成混乱：用 step_count 判断“主步”
             step_count = 0
@@ -133,7 +125,6 @@ class SimulationWorker(QThread):
                 # 6. Logging (节流输出，更像 OpenFAST OutDec)
                 if do_log:
                     wave_elev = float(seastate.get_wave_elevation(0, 0))
-                    current_speed = float(seastate.get_current_velocity(0.0)[0])
                     hss_spd = float(curr_state[33] * self.params.GearboxRatio)
                     pwr = float(gen_torq * hss_spd * self.params.GenEfficiency)
 
@@ -146,7 +137,6 @@ class SimulationWorker(QThread):
                         # ----- Environment -----
                         "WindSpeed": v_wind,
                         "WaveElev": wave_elev,
-                        "CurrentSpeed": current_speed,
 
                         # ----- Control / drivetrain -----
                         "RotSpeed": float(curr_state[33]),        # rad/s
@@ -230,10 +220,6 @@ class SimulationWorker(QThread):
 
                     self.data_signal.emit(data)
 
-                if do_log:
-                    logs = self._build_log_packages(t, state, self.log_cache, seastate)
-                    data_logger.log(self.log_cache, logs)
-
                 # 进度条也可以节流一下（避免 UI 主线程太忙）
                 if step_count % self.ui_stride == 0:
                     self.progress_signal.emit((t / self.t_total) * 100.0, time.time() - wall_start)
@@ -245,60 +231,7 @@ class SimulationWorker(QThread):
         except Exception:
             self.error_signal.emit(traceback.format_exc())
 
-        if data_logger:
-            data_logger.close()
         self.finished_signal.emit()
 
     def stop(self):
         self.running = False
-
-    def _build_log_packages(self, t, state, log_cache, seastate):
-        dof_data = {"time": float(t)}
-        for i, name in enumerate([
-            "Surge", "Sway", "Heave", "Roll", "Pitch", "Yaw",
-            "TwrFA1", "TwrSS1", "TwrFA2", "TwrSS2",
-            "NacYaw", "GenAz", "DrTr",
-            "B1F1", "B1E1", "B1F2",
-            "B2F1", "B2E1", "B2F2",
-            "B3F1", "B3E1", "B3F2"
-        ]):
-            dof_data[f"dof_{name}"] = float(state[i])
-
-        current_speed = float(seastate.get_current_velocity(0.0)[0])
-        hydro_data = {
-            "time": float(t),
-            "WaveElev": float(log_cache.get("WaveElev", 0.0)),
-            "CurrentSpeed": current_speed,
-            "HydroFx": float(log_cache.get("HydroFx", 0.0)),
-            "HydroFy": float(log_cache.get("HydroFy", 0.0)),
-            "HydroFz": float(log_cache.get("HydroFz", 0.0)),
-            "HydroMx": float(log_cache.get("HydroMx", 0.0)),
-            "HydroMy": float(log_cache.get("HydroMy", 0.0)),
-            "HydroMz": float(log_cache.get("HydroMz", 0.0)),
-        }
-
-        wind_data = {
-            "time": float(t),
-            "WindSpeed": float(log_cache.get("WindSpeed", 0.0)),
-            "AeroThrust": float(log_cache.get("AeroThrust", 0.0)),
-            "GenTq": float(log_cache.get("GenTq", 0.0)),
-            "GenPwr": float(log_cache.get("GenPwr", 0.0)),
-            "PitchCmd": float(log_cache.get("PitchCmd", 0.0)),
-        }
-
-        moor_data = {
-            "time": float(t),
-            "MoorFx": float(log_cache.get("MoorFx", 0.0)),
-            "MoorFy": float(log_cache.get("MoorFy", 0.0)),
-            "MoorFz": float(log_cache.get("MoorFz", 0.0)),
-            "MoorMx": float(log_cache.get("MoorMx", 0.0)),
-            "MoorMy": float(log_cache.get("MoorMy", 0.0)),
-            "MoorMz": float(log_cache.get("MoorMz", 0.0)),
-        }
-
-        return {
-            "dof": dof_data,
-            "hydro": hydro_data,
-            "wind_aero": wind_data,
-            "moor": moor_data,
-        }

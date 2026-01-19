@@ -1,263 +1,184 @@
-import time
-
-from PySide6.QtWidgets import (QMainWindow, QMessageBox, QWidget, QVBoxLayout,
-                               QHBoxLayout, QFrame, QPushButton, QFileDialog,
-                               QLabel, QDoubleSpinBox, QSplitter)
-from PySide6.QtCore import Slot, QEvent
+from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+                               QLabel, QPushButton, QStackedWidget, QMessageBox)
+from PySide6.QtCore import Qt, Slot
+from PySide6.QtGui import QFont
 
 from config.fast_params import SystemParams
 from solver.worker import SimulationWorker
+from visualization.widgets.dock_control import ControlDockWidget
 from visualization.widgets.dock_3d import View3DDockWidget
+from visualization.widgets.panel_observer import ObserverPanel
+from visualization.widgets.scope_window import TimeScopeWindow, FrequencyScopeWindow
 from visualization.dialog_env import EnvironmentDialog
-from visualization.edit_dialogs import WindDialog, WaveCurrentDialog, MooringDialog, StructureDialog
-from visualization.widgets.observer_panel import ObserverPanel
-from solver.data_logger import LogConfig
+from visualization.dialog_turbine import TurbineDialog
+from visualization.data_saver import DataSaver
 
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(f"LabFAST V0.0.1 (AeroDyn 15 + Kane 22-DOF)")
+        self.setWindowTitle("LabFAST V0.0.1 (AeroDyn 15 + Kane 22-DOF)")
         self.resize(1600, 1000)
 
         self.params = SystemParams()
         self.worker = None
-        self.log_base_dir = "."
-        self.mode = "operator"
-        self._last_ui_update = 0.0
-        self._ui_interval = 1 / 30.0
-
         self.data_history = []
-        self.init_layout()
-        self.init_menu()
+        self.time_scopes = []
+        self.freq_scopes = []
+        self.data_saver = DataSaver()
 
-    def init_layout(self):
+        self._build_ui()
+        self.apply_theme()
+        self.set_mode("operator")
+
+    def _build_ui(self):
         central = QWidget()
-        main_layout = QVBoxLayout(central)
-        main_layout.setContentsMargins(8, 8, 8, 8)
+        self.setCentralWidget(central)
+        layout = QVBoxLayout(central)
+        layout.setContentsMargins(16, 12, 16, 12)
+
+        top_bar = QHBoxLayout()
+        title = QLabel("LabFAST Digital Twin")
+        title.setFont(QFont("Segoe UI", 14, QFont.Bold))
+        top_bar.addWidget(title)
+
+        top_bar.addStretch()
+        self.btn_operator = QPushButton("Operator")
+        self.btn_observer = QPushButton("Observer")
+        for btn in (self.btn_operator, self.btn_observer):
+            btn.setCheckable(True)
+            btn.setMinimumWidth(100)
+        self.btn_operator.clicked.connect(lambda: self.set_mode("operator"))
+        self.btn_observer.clicked.connect(lambda: self.set_mode("observer"))
+        top_bar.addWidget(self.btn_operator)
+        top_bar.addWidget(self.btn_observer)
+        layout.addLayout(top_bar)
+
+        body = QHBoxLayout()
+        layout.addLayout(body)
 
         self.widget_3d = View3DDockWidget(self.params)
-        self.widget_3d.sig_frame_request.connect(self.on_3d_frame_request)
-        self.widget_3d.sig_edit_wind.connect(self.open_wind_dialog)
-        self.widget_3d.sig_edit_wave.connect(self.open_wave_dialog)
-        self.widget_3d.sig_edit_mooring.connect(self.open_mooring_dialog)
-        self.widget_3d.sig_edit_structure.connect(self.open_structure_dialog)
-        self.widget_3d.view.installEventFilter(self)
+        body.addWidget(self.widget_3d, stretch=3)
 
-        if hasattr(self, "_build_operator_view"):
-            self.operator_widget = self._build_operator_view()
-        else:
-            self.operator_widget = self._build_bottom_bar()
-        self.observer_widget = self._build_observer_view()
-        self.observer_widget.hide()
+        self.side_stack = QStackedWidget()
+        self.side_stack.setFixedWidth(360)
+        body.addWidget(self.side_stack, stretch=0)
 
-        main_layout.addWidget(self.operator_widget, stretch=1)
-        main_layout.addWidget(self.observer_widget, stretch=1)
-
-        self.setCentralWidget(central)
-
-    def _build_bottom_bar(self):
-        container = QWidget()
-        layout = QVBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
-
-        layout.addWidget(self.widget_3d, stretch=8)
-
-        bottom_bar = self._build_operator_bar()
-        layout.addWidget(bottom_bar, stretch=2)
-        return container
-
-    def _build_operator_bar(self):
-        container = QWidget()
-        layout = QHBoxLayout(container)
-        layout.setSpacing(16)
-        layout.setContentsMargins(0, 8, 0, 0)
-
-        data_panel = self._build_data_panel()
-        control_panel = self._build_micro_control_panel()
-        power_panel = self._build_power_panel()
-
-        layout.addWidget(data_panel, stretch=2)
-        layout.addWidget(control_panel, stretch=4)
-        layout.addWidget(power_panel, stretch=2)
-        return container
-
-    def _build_data_panel(self):
-        frame = QFrame()
-        frame.setFrameShape(QFrame.StyledPanel)
-        frame.setStyleSheet(
-            "QFrame {"
-            "background-color: #070b14;"
-            "border: 1px solid #7cf4ff;"
-            "border-radius: 10px;"
-            "}"
-            "QPushButton {"
-            "color: #d7faff;"
-            "background-color: #0f1c2c;"
-            "border: 1px solid #19d3ff;"
-            "border-radius: 6px;"
-            "padding: 10px 14px;"
-            "font-weight: 600;"
-            "}"
-            "QPushButton:hover {"
-            "background-color: #12304a;"
-            "}"
-        )
-        layout = QVBoxLayout(frame)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(12)
-        layout.addStretch()
-        self.btn_save_file = QPushButton("数据保存通道")
-        self.btn_save_file.clicked.connect(self.on_save_file)
-        layout.addWidget(self.btn_save_file)
-        layout.addStretch()
-        return frame
-
-    def _build_micro_control_panel(self):
-        frame = QFrame()
-        frame.setFrameShape(QFrame.StyledPanel)
-        frame.setStyleSheet(
-            "QFrame {"
-            "background-color: #0b0f1a;"
-            "border: 1px solid #19d3ff;"
-            "border-radius: 10px;"
-            "}"
-            "QLabel {"
-            "color: #d7faff;"
-            "}"
-            "QDoubleSpinBox {"
-            "background-color: #0f1c2c;"
-            "color: #d7faff;"
-            "border: 1px solid #19d3ff;"
-            "border-radius: 4px;"
-            "padding: 2px 6px;"
-            "}"
-            "QPushButton {"
-            "color: #d7faff;"
-            "background-color: #0f1c2c;"
-            "border: 1px solid #19d3ff;"
-            "border-radius: 6px;"
-            "padding: 8px 12px;"
-            "font-weight: 600;"
-            "}"
-            "QPushButton:hover {"
-            "background-color: #12304a;"
-            "}"
-        )
-        layout = QVBoxLayout(frame)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(10)
-
-        header = QLabel("微控制板")
-        header.setStyleSheet("font-weight: 700; font-size: 14px;")
-        layout.addWidget(header)
-
-        row_time = QHBoxLayout()
-        row_time.addWidget(QLabel("时长(s):"))
-        self.spin_time = QDoubleSpinBox()
-        self.spin_time.setRange(10, 3600)
-        self.spin_time.setValue(600)
-        row_time.addWidget(self.spin_time)
-        row_time.addStretch()
-        layout.addLayout(row_time)
-
-        row_step = QHBoxLayout()
-        row_step.addWidget(QLabel("步长(s):"))
-        self.spin_dt = QDoubleSpinBox()
-        self.spin_dt.setRange(0.001, 0.1)
-        self.spin_dt.setDecimals(3)
-        self.spin_dt.setSingleStep(0.005)
-        self.spin_dt.setValue(0.01)
-        row_step.addWidget(self.spin_dt)
-        row_step.addStretch()
-        layout.addLayout(row_step)
-
-        row_btn = QHBoxLayout()
-        self.btn_run = QPushButton("开始")
-        self.btn_stop = QPushButton("停止")
-        self.btn_stop.setEnabled(False)
-        self.btn_run.clicked.connect(self.on_micro_start)
-        self.btn_stop.clicked.connect(self.stop_simulation)
-        row_btn.addWidget(self.btn_run)
-        row_btn.addWidget(self.btn_stop)
-        layout.addLayout(row_btn)
-        return frame
-
-    def _build_power_panel(self):
-        frame = QFrame()
-        frame.setFrameShape(QFrame.StyledPanel)
-        frame.setStyleSheet(
-            "QFrame {"
-            "background-color: #070b14;"
-            "border: 1px solid #7cf4ff;"
-            "border-radius: 10px;"
-            "}"
-            "QLabel {"
-            "color: #d7faff;"
-            "}"
-        )
-        layout = QVBoxLayout(frame)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(12)
-        self.lbl_power = QLabel("功率: 0.00 MW")
-        self.lbl_power.setStyleSheet("font-size: 16px; font-weight: 700;")
-        self.lbl_runtime = QLabel("运行时间: 0.00 s")
-        layout.addStretch()
-        layout.addWidget(self.lbl_power)
-        layout.addWidget(self.lbl_runtime)
-        layout.addStretch()
-        return frame
-
-    def _build_observer_view(self):
-        container = QWidget()
-        layout = QHBoxLayout(container)
-        splitter = QSplitter()
-        self.observer_3d = View3DDockWidget(self.params)
-        self.observer_3d.view.installEventFilter(self)
-        self.observer_3d.sig_frame_request.connect(self.on_observer_frame_request)
+        self.operator_panel = ControlDockWidget(show_channels=False, show_env_button=False)
         self.observer_panel = ObserverPanel()
-        splitter.addWidget(self.observer_3d)
-        splitter.addWidget(self.observer_panel)
-        splitter.setStretchFactor(0, 2)
-        splitter.setStretchFactor(1, 3)
-        layout.addWidget(splitter)
-        return container
+        self.side_stack.addWidget(self.operator_panel)
+        self.side_stack.addWidget(self.observer_panel)
 
-    def init_menu(self):
-        menu = self.menuBar()
+        # --- Signal Connections ---
+        self.operator_panel.sig_start_sim.connect(self.start_simulation)
+        self.operator_panel.sig_stop_sim.connect(self.stop_simulation)
+        self.operator_panel.sig_save_config_changed.connect(self.on_save_config_changed)
 
-        sett_menu = menu.addMenu("Settings")
-        sett_menu.addAction("Environment...", self.open_env_dialog)
-        sett_menu.addAction("Wind...", self.open_wind_dialog)
-        sett_menu.addAction("Wave/Current...", self.open_wave_dialog)
-        sett_menu.addAction("Mooring...", self.open_mooring_dialog)
-        sett_menu.addAction("Structure...", self.open_structure_dialog)
+        self.observer_panel.sig_create_time_scopes.connect(self.create_time_scopes)
+        self.observer_panel.sig_create_freq_scopes.connect(self.create_freq_scopes)
 
-    def open_env_dialog(self):
-        dlg = EnvironmentDialog(self.params, self)
+        self.widget_3d.sig_frame_request.connect(self.on_3d_frame_request)
+        self.widget_3d.sig_edit_wind.connect(lambda: self.open_env_dialog("wind"))
+        self.widget_3d.sig_edit_wave.connect(lambda: self.open_env_dialog("wave"))
+        self.widget_3d.sig_edit_mooring.connect(lambda: self.open_env_dialog("mooring"))
+        self.widget_3d.sig_edit_structure.connect(self.open_structure_dialog)
+
+    def apply_theme(self):
+        self.setStyleSheet("""
+            QMainWindow { background: #f4f7fb; }
+            QLabel { color: #1f2933; }
+            QGroupBox {
+                border: 1px solid #d7dde3;
+                border-radius: 10px;
+                margin-top: 12px;
+                font-weight: 600;
+                background: #ffffff;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 12px;
+                padding: 0 6px;
+                color: #374151;
+            }
+            QPushButton {
+                background: #1f6feb;
+                color: white;
+                border-radius: 8px;
+                padding: 6px 12px;
+            }
+            QPushButton:checked {
+                background: #0f4bb3;
+            }
+            QPushButton:disabled {
+                background: #b9c0c6;
+                color: #eef1f4;
+            }
+            QProgressBar {
+                border: 1px solid #d7dde3;
+                border-radius: 6px;
+                text-align: center;
+            }
+            QProgressBar::chunk { background: #46b6a1; }
+        """)
+
+    def set_mode(self, mode):
+        is_operator = mode == "operator"
+        self.btn_operator.setChecked(is_operator)
+        self.btn_observer.setChecked(not is_operator)
+        self.side_stack.setCurrentIndex(0 if is_operator else 1)
+
+    def open_env_dialog(self, tab=None):
+        dlg = EnvironmentDialog(self.params, self, initial_tab=tab)
         if dlg.exec():
             self.params = dlg.get_params()
-            self.widget_3d.params = self.params
+            self.widget_3d.apply_params(self.params)
 
-    def on_save_file(self):
-        folder = QFileDialog.getExistingDirectory(self, "选择数据保存通道", self.log_base_dir)
-        if folder:
-            self.log_base_dir = folder
-            display_name = folder.rstrip("/").split("/")[-1] or folder
-            self.btn_save_file.setText(f"数据保存: {display_name}")
+    def open_structure_dialog(self):
+        dlg = TurbineDialog(self.params, self)
+        if dlg.exec():
+            self.params = dlg.get_params()
+            self.widget_3d.apply_params(self.params)
 
-    def on_micro_start(self):
-        self.start_simulation(self.spin_time.value(), self.spin_dt.value())
+    def create_time_scopes(self, count):
+        for _ in range(count):
+            win = TimeScopeWindow(self)
+            win.configure_channels()
+            if not win.channels:
+                win.close()
+                continue
+            self._register_scope(win, self.time_scopes)
+            win.show()
+
+    def create_freq_scopes(self, count):
+        for _ in range(count):
+            win = FrequencyScopeWindow(self)
+            win.configure_channels()
+            if not win.channels:
+                win.close()
+                continue
+            self._register_scope(win, self.freq_scopes)
+            win.show()
+
+    def _register_scope(self, win, collection):
+        collection.append(win)
+        win.finished.connect(lambda _: self._unregister_scope(win, collection))
+
+    def _unregister_scope(self, win, collection):
+        if win in collection:
+            collection.remove(win)
 
     def start_simulation(self, t_total, dt):
-        self.btn_run.setEnabled(False)
-        self.btn_stop.setEnabled(True)
+        self.operator_panel.btn_run.setEnabled(False)
+        self.operator_panel.btn_stop.setEnabled(True)
         self.data_history = []
+        for win in self.time_scopes + self.freq_scopes:
+            win.reset_session()
 
-        log_config = LogConfig(save_dof=True, save_hydro=True, save_wind_aero=True, save_moor=True)
-        self.worker = SimulationWorker(self.params, t_total, dt, log_config=log_config, log_base_dir=self.log_base_dir)
+        self.data_saver.start(self.operator_panel.save_config)
+
+        self.worker = SimulationWorker(self.params, t_total, dt)
         self.worker.data_signal.connect(self.on_data_update)
+        self.worker.progress_signal.connect(self.operator_panel.update_progress)
         self.worker.finished_signal.connect(self.on_sim_finished)
         self.worker.error_signal.connect(lambda e: QMessageBox.critical(self, "Error", e))
         self.worker.start()
@@ -265,108 +186,56 @@ class MainWindow(QMainWindow):
     def stop_simulation(self):
         if self.worker:
             self.worker.stop()
-        self.btn_run.setEnabled(True)
-        self.btn_stop.setEnabled(False)
+
+    def on_save_config_changed(self, config):
+        if self.data_saver.folder:
+            self.data_saver.start(config)
 
     @Slot(dict)
     def on_data_update(self, data):
         self.data_history.append(data)
+        self.data_saver.write(data)
+
+        for win in self.time_scopes:
+            win.update_data(data)
+        for win in self.freq_scopes:
+            win.update_data(data)
+
         total_frames = len(self.data_history)
+        self.widget_3d.update_timeline(total_frames, data["time"])
+        self.widget_3d.update_environment(data)
 
-        now = time.monotonic()
-        if now - self._last_ui_update < self._ui_interval:
-            return
-        self._last_ui_update = now
-
-        self.widget_3d.update_timeline(total_frames, data['time'])
         if self.widget_3d.chk_sync.isChecked():
-            self._update_3d_view(self.widget_3d, data)
-        if self.mode == "observer":
-            self.observer_3d.update_timeline(total_frames, data['time'])
-            if self.observer_3d.chk_sync.isChecked():
-                self._update_3d_view(self.observer_3d, data)
+            self._update_3d_view(data)
 
-        # 2. Update Power Label (Use updated key: env_GenPower)
-        pwr = data.get('env_GenPower', data.get('GenPwr', 0.0))
-        p_mw = pwr / 1e6
-        self.lbl_power.setText(f"功率: {p_mw:.2f} MW")
-        self.lbl_runtime.setText(f"运行时间: {data['time']:.2f} s")
+        pwr = data.get("GenPwr", data.get("env_GenPower", 0.0))
+        self.operator_panel.lbl_power.setText(f"Power: {pwr / 1e6:.2f} MW")
+        self.operator_panel.update_telemetry(data)
 
-        self.observer_panel.update_data(data)
-        channels = sorted(data.keys())
-        self.observer_panel.set_available_channels(channels)
-
-    def _update_3d_view(self, view, data):
-        """Map new dof_ keys to 3D view"""
+    def _update_3d_view(self, data):
         state_rigid = [
-            data.get('dof_Surge', 0),
-            data.get('dof_Sway', 0),
-            data.get('dof_Heave', 0),
-            data.get('dof_Roll', 0),
-            data.get('dof_Pitch', 0),
-            data.get('dof_Yaw', 0)
+            data.get("dof_Surge", 0),
+            data.get("dof_Sway", 0),
+            data.get("dof_Heave", 0),
+            data.get("dof_Roll", 0),
+            data.get("dof_Pitch", 0),
+            data.get("dof_Yaw", 0),
         ]
-        view.update_pose(state_rigid, data['time'])
+        self.widget_3d.update_pose(state_rigid, data["time"])
 
     @Slot(int)
     def on_3d_frame_request(self, idx):
-        history = self.data_history
-        if 0 <= idx < len(history):
-            data = history[idx]
-            self._update_3d_view(self.widget_3d, data)
+        if 0 <= idx < len(self.data_history):
+            data = self.data_history[idx]
+            self._update_3d_view(data)
             self.widget_3d.lbl_time.setText(f"T: {data['time']:.2f}s")
-
-    @Slot(int)
-    def on_observer_frame_request(self, idx):
-        history = self.data_history
-        if 0 <= idx < len(history):
-            data = history[idx]
-            self._update_3d_view(self.observer_3d, data)
-            self.observer_3d.lbl_time.setText(f"T: {data['time']:.2f}s")
 
     @Slot()
     def on_sim_finished(self):
-        self.btn_run.setEnabled(True)
-        self.btn_stop.setEnabled(False)
-
-        log_path = getattr(self.worker, 'log_dir', 'Unknown')
+        self.operator_panel.btn_run.setEnabled(True)
+        self.operator_panel.btn_stop.setEnabled(False)
+        self.operator_panel.progress.setValue(100)
+        log_path = self.data_saver.folder or "Unknown"
+        self.data_saver.close()
         QMessageBox.information(self, "Simulation Finished",
                                 f"Simulation Completed.\nData saved to:\n{log_path}")
-
-    def open_wind_dialog(self):
-        dlg = WindDialog(self.params, self)
-        if dlg.exec():
-            dlg.apply()
-
-    def open_wave_dialog(self):
-        dlg = WaveCurrentDialog(self.params, self)
-        if dlg.exec():
-            dlg.apply()
-
-    def open_mooring_dialog(self):
-        dlg = MooringDialog(self.params, self)
-        if dlg.exec():
-            dlg.apply()
-
-    def open_structure_dialog(self):
-        dlg = StructureDialog(self.params, self)
-        if dlg.exec():
-            dlg.apply()
-
-    def eventFilter(self, obj, event):
-        if event.type() == QEvent.MouseButtonDblClick:
-            self.toggle_mode()
-            return True
-        return super().eventFilter(obj, event)
-
-    def toggle_mode(self):
-        if self.mode == "operator":
-            self.mode = "observer"
-            self.operator_widget.hide()
-            self.observer_widget.show()
-            if self.data_history:
-                self._update_3d_view(self.observer_3d, self.data_history[-1])
-        else:
-            self.mode = "operator"
-            self.observer_widget.hide()
-            self.operator_widget.show()

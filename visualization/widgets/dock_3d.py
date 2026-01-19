@@ -1,12 +1,51 @@
 import pyqtgraph.opengl as gl
 import pyqtgraph as pg
-from PySide6.QtGui import QColor, QVector3D
+from PySide6.QtGui import QColor, QVector3D, QVector4D
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QSlider, QCheckBox, QLabel
 from PySide6.QtCore import Qt, Signal
 import numpy as np
 
-from visualization.widgets.interactive_view import InteractiveGLViewWidget
+class PickingGLView(gl.GLViewWidget):
+    sig_items_right_clicked = Signal(list, object)
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._right_press_pos = None
+        self._right_dragging = False
+
+    def mousePressEvent(self, ev):
+        if ev.button() == Qt.RightButton:
+            self._right_press_pos = ev.position() if hasattr(ev, "position") else ev.localPos()
+            self._right_dragging = False
+            ev.accept()
+            return
+        super().mousePressEvent(ev)
+
+    def mouseMoveEvent(self, ev):
+        if ev.buttons() == Qt.RightButton and self._right_press_pos is not None:
+            pos = ev.position() if hasattr(ev, "position") else ev.localPos()
+            if (pos - self._right_press_pos).manhattanLength() > 4:
+                self._right_dragging = True
+            ev.accept()
+            return
+        super().mouseMoveEvent(ev)
+
+    def mouseReleaseEvent(self, ev):
+        if ev.button() == Qt.RightButton and self._right_press_pos is not None:
+            if not self._right_dragging:
+                pos = ev.position() if hasattr(ev, "position") else ev.localPos()
+                x = int(pos.x())
+                y = int(pos.y())
+                try:
+                    items = self.itemsAt((x - 3, y - 3, 6, 6))
+                except Exception:
+                    items = []
+                self.sig_items_right_clicked.emit(items, pos)
+            self._right_press_pos = None
+            self._right_dragging = False
+            ev.accept()
+            return
+        super().mouseReleaseEvent(ev)
 
 class View3DDockWidget(QWidget):
     sig_frame_request = Signal(int)
@@ -18,6 +57,8 @@ class View3DDockWidget(QWidget):
     def __init__(self, params):
         super().__init__()
         self.params = params
+        self._last_pose = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+        self._last_click_pos = None
 
         # 几何参数 (基于中心点定位)
         self.h_plat_bot = -20.0
@@ -44,13 +85,13 @@ class View3DDockWidget(QWidget):
         self.z_cen_nac   = self.h_hub
 
         # 材质库
-        self.col_sky = QColor(120, 170, 210)
-        self.mat_white = (0.96, 0.96, 0.98, 1.0)
-        self.mat_red   = (0.85, 0.15, 0.15, 1.0)
-        self.mat_dark  = (0.15, 0.18, 0.2, 1.0)
-        self.mat_plat  = (0.85, 0.75, 0.2, 1.0)
-        self.mat_tp    = (0.2, 0.2, 0.25, 1.0)
-        self.mat_fairlead = (1.0, 0.5, 0.0, 1.0)
+        self.col_sky = QColor(135, 206, 235)
+        self.mat_white = (0.95, 0.95, 0.95, 1.0)
+        self.mat_red   = (0.9, 0.1, 0.1, 1.0) # 鲜艳红
+        self.mat_dark  = (0.2, 0.2, 0.2, 1.0)
+        self.mat_plat  = (0.95, 0.8, 0.0, 1.0)
+        self.mat_tp    = (0.1, 0.1, 0.1, 1.0)
+        self.mat_fairlead = (1.0, 0.5, 0.0, 1.0) # 橙色导缆孔
 
         self.setup_ui()
         self.init_scene()
@@ -58,15 +99,10 @@ class View3DDockWidget(QWidget):
     def setup_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        self.view = InteractiveGLViewWidget()
+        self.view = PickingGLView()
         self.view.setBackgroundColor(self.col_sky)
         self.view.setCameraPosition(distance=180, elevation=15, azimuth=-140)
         layout.addWidget(self.view)
-
-        self.view.clicked_sky.connect(self.sig_edit_wind.emit)
-        self.view.clicked_wave.connect(self.sig_edit_wave.emit)
-        self.view.clicked_mooring.connect(self.sig_edit_mooring.emit)
-        self.view.clicked_structure.connect(self.sig_edit_structure.emit)
 
         ctrl_bar = QHBoxLayout(); ctrl_bar.setContentsMargins(5, 5, 5, 5)
         self.chk_sync = QCheckBox("Live Sync"); self.chk_sync.setChecked(True)
@@ -75,6 +111,8 @@ class View3DDockWidget(QWidget):
         self.slider.valueChanged.connect(self.on_slider_changed)
         ctrl_bar.addWidget(self.chk_sync); ctrl_bar.addWidget(self.lbl_time); ctrl_bar.addWidget(self.slider)
         layout.addLayout(ctrl_bar)
+
+        self.view.sig_items_right_clicked.connect(self.on_items_clicked)
 
     def _create_cylinder(self, r_base, r_top, length, color, rows=12, cols=24):
         """创建中心位于原点的圆柱体"""
@@ -151,22 +189,22 @@ class View3DDockWidget(QWidget):
 
     def init_scene(self):
         axis = gl.GLAxisItem(); axis.setSize(30, 30, 30); self.view.addItem(axis)
+        grid = gl.GLGridItem()
+        grid.setSize(600, 600)
+        grid.setSpacing(40, 40)
+        grid.translate(0, 0, 0)
+        self.view.addItem(grid)
+        self.item_roles = {}
 
-        # --- 0. Scene References ---
-        sea_grid = gl.GLGridItem()
-        sea_grid.setSize(600, 600)
-        sea_grid.setSpacing(50, 50)
-        sea_grid.setColor(QColor(255, 255, 255, 60))
-        self.view.addItem(sea_grid)
-        self.sea_grid = sea_grid
-
-        seabed_grid = gl.GLGridItem()
-        seabed_grid.setSize(800, 800)
-        seabed_grid.setSpacing(50, 50)
-        seabed_grid.setColor(QColor(30, 50, 70, 120))
-        seabed_grid.translate(0, 0, -self.params.WaterDepth)
-        self.view.addItem(seabed_grid)
-        self.seabed_grid = seabed_grid
+        sky_md = gl.MeshData.sphere(rows=30, cols=60, radius=800)
+        sky_cols = []
+        for v in sky_md.vertexes():
+            z = v[2] / 800.0
+            col = [0.15 + 0.35 * (z + 1) / 2, 0.4 + 0.5 * (z + 1) / 2, 0.8 + 0.2 * (z + 1) / 2, 0.25]
+            sky_cols.append(col)
+        self.sky_dome = gl.GLMeshItem(meshdata=sky_md, smooth=True, vertexColors=np.array(sky_cols))
+        self.sky_dome.setGLOptions("translucent")
+        self.view.addItem(self.sky_dome)
 
         # --- 1. Platform ---
         self.plat_parts = []
@@ -175,6 +213,7 @@ class View3DDockWidget(QWidget):
         self.main_col = self._create_cylinder(r_base=3.25, r_top=3.25, length=self.len_main_col, color=self.mat_plat)
         self.plat_parts.append({'item': self.main_col, 'local_z': self.z_cen_main, 'local_xy': (0,0)})
         self.view.addItem(self.main_col)
+        self.item_roles[self.main_col] = "structure"
 
         # Offset Columns
         r_off = 28.87
@@ -186,32 +225,39 @@ class View3DDockWidget(QWidget):
             col = self._create_cylinder(r_base=6.0, r_top=6.0, length=len_off, color=self.mat_plat)
             self.plat_parts.append({'item': col, 'local_z': z_cen_off, 'local_xy': (x,y)})
             self.view.addItem(col)
+            self.item_roles[col] = "structure"
 
             brace_pts = np.array([[0,0,-5], [x,y,-5]])
             brace = gl.GLLinePlotItem(pos=brace_pts, width=4, color=self.mat_dark)
             self.plat_parts.append({'item': brace, 'type': 'brace', 'p_local': brace_pts})
             self.view.addItem(brace)
+            self.item_roles[brace] = "structure"
 
         # --- 2. TP & Tower ---
         self.tp = self._create_cylinder(r_base=3.25, r_top=3.00, length=self.len_tp, color=self.mat_tp)
         self.view.addItem(self.tp)
+        self.item_roles[self.tp] = "structure"
 
         self.tower = self._create_cylinder(r_base=3.00, r_top=1.93, length=self.len_tower, color=self.mat_white)
         self.view.addItem(self.tower)
+        self.item_roles[self.tower] = "structure"
 
         # --- 3. RNA ---
         self.nacelle = self._create_box_mesh(self.nac_len, self.nac_w, self.nac_h, self.mat_white)
         self.view.addItem(self.nacelle)
+        self.item_roles[self.nacelle] = "structure"
 
         self.hub = self._create_cylinder(r_base=2.0, r_top=2.0, length=4.0, color=self.mat_dark)
         self.hub.rotate(90, 0, 1, 0)
         self.view.addItem(self.hub)
+        self.item_roles[self.hub] = "structure"
 
         # [V2.11] 使用新的红白叶片
         self.blades = []
         for i in range(3):
             b = self._create_blade_mesh(self.params.R)
             self.view.addItem(b); self.blades.append(b)
+            self.item_roles[b] = "structure"
 
         # --- 4. Mooring System ---
         self.lines = []
@@ -219,6 +265,7 @@ class View3DDockWidget(QWidget):
             # 加粗线条，提高可见度
             l = gl.GLLinePlotItem(width=3.0, color=self.mat_dark, antialias=True)
             self.view.addItem(l); self.lines.append(l)
+            self.item_roles[l] = "mooring"
 
         d = self.params.WaterDepth
         self.anchors = [QVector3D(837*np.cos(r), 837*np.sin(r), -d) for r in [np.pi, np.pi/3, -np.pi/3]]
@@ -233,14 +280,18 @@ class View3DDockWidget(QWidget):
             self.view.addItem(item)
             # 存储其局部坐标以便跟随运动
             self.fairlead_items.append({'item': item, 'local_pos': fl_local})
+            self.item_roles[item] = "mooring"
 
         # --- 5. Wave ---
         self.wave_x = np.linspace(-300, 300, 80); self.wave_y = np.linspace(-300, 300, 80)
         self.wave_X, self.wave_Y = np.meshgrid(self.wave_x, self.wave_y)
         self.wave = gl.GLSurfacePlotItem(x=self.wave_x, y=self.wave_y, z=np.zeros_like(self.wave_X), shader='shaded', computeNormals=True, smooth=True)
         self.view.addItem(self.wave)
+        self.item_roles[self.wave] = "wave"
 
-        self.update_pose(np.zeros(6), 0.0)
+        self.wind_arrow = gl.GLLinePlotItem(width=2.0, color=(1.0, 1.0, 1.0, 0.8))
+        self.view.addItem(self.wind_arrow)
+        self._init_visual_state()
 
     def on_slider_changed(self, val):
         if not self.chk_sync.isChecked(): self.sig_frame_request.emit(val)
@@ -251,11 +302,173 @@ class View3DDockWidget(QWidget):
             self.slider.blockSignals(True); self.slider.setValue(total - 1); self.slider.blockSignals(False)
         self.lbl_time.setText(f"T: {curr:.2f}s")
 
+    def on_items_clicked(self, items, pos):
+        self._last_click_pos = pos
+        roles = set()
+        for item in items:
+            role = self.item_roles.get(item)
+            if role:
+                roles.add(role)
+
+        if "wave" in roles:
+            self.sig_edit_wave.emit()
+            return
+        if "mooring" in roles:
+            self.sig_edit_mooring.emit()
+            return
+
+        alt = self._classify_by_ray(self._last_click_pos)
+        if alt == "wave":
+            self.sig_edit_wave.emit()
+            return
+        if alt == "mooring":
+            self.sig_edit_mooring.emit()
+            return
+        if alt == "structure":
+            self.sig_edit_structure.emit()
+            return
+        if alt == "wind":
+            self.sig_edit_wind.emit()
+            return
+
+        if "structure" in roles:
+            self.sig_edit_structure.emit()
+        else:
+            self.sig_edit_wind.emit()
+
+    def _classify_by_ray(self, pos):
+        if pos is None:
+            return None
+        ray = self._get_view_ray(pos)
+        if ray is None:
+            return None
+        origin, direction = ray
+
+        if self._ray_hits_mooring(origin, direction, threshold=10.0):
+            return "mooring"
+
+        hit_struct = self._ray_hit_structure(origin, direction, radius=25.0)
+        hit_water = self._ray_hit_water(origin, direction)
+
+        if hit_struct is not None and (hit_water is None or hit_struct < hit_water):
+            return "structure"
+        if hit_water is not None:
+            return "wave"
+        return "wind"
+
+    def _get_view_ray(self, pos):
+        w = self.view.width()
+        h = self.view.height()
+        if w <= 0 or h <= 0:
+            return None
+        ndc_x = (2.0 * pos.x() / w) - 1.0
+        ndc_y = 1.0 - (2.0 * pos.y() / h)
+        viewport = (0, 0, w, h)
+        proj = self.view.projectionMatrix(viewport, viewport)
+        view = self.view.viewMatrix()
+        inv, ok = (proj * view).inverted()
+        if not ok:
+            return None
+        p_near = inv.map(QVector4D(ndc_x, ndc_y, -1.0, 1.0))
+        p_far = inv.map(QVector4D(ndc_x, ndc_y, 1.0, 1.0))
+        if p_near.w() == 0 or p_far.w() == 0:
+            return None
+        near = np.array([p_near.x() / p_near.w(), p_near.y() / p_near.w(), p_near.z() / p_near.w()])
+        far = np.array([p_far.x() / p_far.w(), p_far.y() / p_far.w(), p_far.z() / p_far.w()])
+        direction = far - near
+        norm = np.linalg.norm(direction)
+        if norm < 1e-6:
+            return None
+        direction = direction / norm
+        return near, direction
+
+    def _ray_hit_water(self, origin, direction):
+        if abs(direction[2]) < 1e-6:
+            return None
+        t = -origin[2] / direction[2]
+        if t <= 0:
+            return None
+        p = origin + t * direction
+        if (self.wave_x.min() <= p[0] <= self.wave_x.max() and
+                self.wave_y.min() <= p[1] <= self.wave_y.max()):
+            return t
+        return None
+
+    def _ray_hit_structure(self, origin, direction, radius=25.0):
+        a = direction[0] ** 2 + direction[1] ** 2
+        if a < 1e-6:
+            return None
+        b = 2.0 * (origin[0] * direction[0] + origin[1] * direction[1])
+        c = origin[0] ** 2 + origin[1] ** 2 - radius ** 2
+        disc = b * b - 4.0 * a * c
+        if disc < 0:
+            return None
+        sqrt_disc = np.sqrt(disc)
+        t1 = (-b - sqrt_disc) / (2.0 * a)
+        t2 = (-b + sqrt_disc) / (2.0 * a)
+        t = min(t for t in [t1, t2] if t > 0) if any(t > 0 for t in [t1, t2]) else None
+        if t is None:
+            return None
+        z = origin[2] + t * direction[2]
+        if z < self.h_plat_bot - 30.0 or z > self.h_hub + 30.0:
+            return None
+        return t
+
+    def _ray_hits_mooring(self, origin, direction, threshold=10.0):
+        surge, sway, heave, roll, pitch, yaw = self._last_pose
+        cr, sr = np.cos(np.radians(roll)), np.sin(np.radians(roll))
+        cp, sp = np.cos(np.radians(pitch)), np.sin(np.radians(pitch))
+        cy, sy = np.cos(np.radians(yaw)), np.sin(np.radians(yaw))
+        R = np.array([
+            [cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr],
+            [sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr],
+            [-sp, cp * sr, cp * cr],
+        ])
+        trans = np.array([surge, sway, heave])
+        for i in range(len(self.lines)):
+            fl = np.array([
+                self.fairleads_local[i].x(),
+                self.fairleads_local[i].y(),
+                self.fairleads_local[i].z(),
+            ])
+            fl_glo = np.dot(R, fl) + trans
+            anch = np.array([
+                self.anchors[i].x(),
+                self.anchors[i].y(),
+                self.anchors[i].z(),
+            ])
+            dist = self._distance_ray_segment(origin, direction, fl_glo, anch)
+            if dist is not None and dist < threshold:
+                return True
+        return False
+
+    def _distance_ray_segment(self, origin, direction, p0, p1):
+        u = p1 - p0
+        v = direction
+        w0 = p0 - origin
+        a = np.dot(u, u)
+        b = np.dot(u, v)
+        c = np.dot(v, v)
+        d = np.dot(u, w0)
+        e = np.dot(v, w0)
+        denom = a * c - b * b
+        if denom < 1e-8:
+            t = 0.0
+            s = max(0.0, e / c)
+        else:
+            t = (b * e - c * d) / denom
+            s = (a * e - b * d) / denom
+        t = max(0.0, min(1.0, t))
+        s = max(0.0, s)
+        closest_seg = p0 + t * u
+        closest_ray = origin + s * v
+        return np.linalg.norm(closest_seg - closest_ray)
+
     def _compute_wave_colors(self, Z):
         z_min, z_max = Z.min(), Z.max()
         z_norm = (Z - z_min) / (z_max - z_min + 1e-5)
-        deep = np.array([0.0, 0.25, 0.45], dtype=np.float32)
-        foam = np.array([0.7, 0.85, 0.95], dtype=np.float32)
+        deep = np.array([0.0, 0.2, 0.5], dtype=np.float32)
+        foam = np.array([0.9, 0.9, 1.0], dtype=np.float32)
         col = (1-z_norm[...,None])*deep + z_norm[...,None]*foam
         alpha = np.ones_like(Z)[...,None]
         return np.concatenate([col, alpha], axis=-1)
@@ -263,6 +476,7 @@ class View3DDockWidget(QWidget):
     def update_pose(self, state, t_time):
         surge, sway, heave = state[0], state[1], state[2]
         roll, pitch, yaw = state[3], state[4], state[5]
+        self._last_pose = (surge, sway, heave, roll, pitch, yaw)
 
         # 1. Base Motion
         tr_base = pg.Transform3D()
@@ -325,3 +539,29 @@ class View3DDockWidget(QWidget):
         phase = t_time * 1.5
         Z = self.params.Env_WaveHeight * np.sin(0.05 * self.wave_X - phase)
         self.wave.setData(z=Z, colors=self._compute_wave_colors(Z))
+
+    def update_environment(self, data):
+        wind = float(data.get("env_wind_speed", 0.0))
+        scale = max(5.0, min(60.0, wind * 3.0))
+        p0 = np.array([0.0, -120.0, 40.0])
+        p1 = np.array([scale, -120.0, 40.0])
+        self.wind_arrow.setData(pos=np.array([p0, p1]))
+
+    def apply_params(self, params):
+        self.params = params
+        self.h_hub = self.params.HubHeight
+        self.z_nac_bottom = self.h_hub - (self.nac_h / 2.0)
+        self.len_main_col = self.h_plat_top - self.h_plat_bot
+        self.len_tp = self.h_tp_top - self.h_plat_top
+        self.len_tower = self.z_nac_bottom - self.h_tp_top
+        self.z_cen_main = (self.h_plat_top + self.h_plat_bot) / 2.0
+        self.z_cen_tp = (self.h_tp_top + self.h_plat_top) / 2.0
+        self.z_cen_tower = self.h_tp_top + (self.len_tower / 2.0)
+        self.z_cen_nac = self.h_hub
+        self.view.clear()
+        self.init_scene()
+
+    def _init_visual_state(self):
+        self.update_pose([0.0, 0.0, 0.0, 0.0, 0.0, 0.0], 0.0)
+        self.update_environment({"env_wind_speed": self.params.Env_WindSpeed})
+        self.view.update()

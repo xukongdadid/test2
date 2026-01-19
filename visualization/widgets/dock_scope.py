@@ -4,6 +4,9 @@ from PySide6.QtCore import Qt
 import pyqtgraph as pg
 import numpy as np
 import csv
+import datetime
+import os
+from visualization.save_config import default_save_config
 
 class ScopeSettingsDialog(QDialog):
     """V2.3 示波器设置 (保持 V2.2 逻辑)"""
@@ -64,8 +67,9 @@ class ScopeDockWidget(QWidget):
     WOUSE V2.3 示波器
     - 全程数据记录与显示 (不截断)
     """
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, enable_recording=False):
         super().__init__(parent)
+        self.enable_recording = enable_recording
         self.layout = QVBoxLayout(self)
 
         # --- Toolbar ---
@@ -100,7 +104,11 @@ class ScopeDockWidget(QWidget):
         self.curves = {}
         self.data_history = []
 
+        self.save_config = default_save_config()
+        self.csv_files = {}
+        self.csv_writers = {}
         self.current_log_path = ""
+        self.overlays = []
         self.y_auto = True; self.y_range = (-10, 10)
 
         # Connections
@@ -134,7 +142,7 @@ class ScopeDockWidget(QWidget):
             else:
                 self.plot_widget.setYRange(s['y_min'], s['y_max'], padding=0)
 
-    def update_channels(self, channels_config):
+    def update_channels(self, channels_config, *_):
         self.active_channels = channels_config
         new_keys = [c['key'] for c in channels_config]
 
@@ -154,9 +162,17 @@ class ScopeDockWidget(QWidget):
             # 如果有数据，立即回填
             if k in self.data_buffers and len(self.data_buffers[k]) == len(times):
                 curve.setData(times, np.array(self.data_buffers[k]))
+        self._redraw_overlays()
 
     def update_data(self, data_frame):
-        # 1. Store Memory (Full History)
+        # 1. CSV Save
+        if self.enable_recording and self.csv_files:
+            self._write_group_csv("Structure Response", data_frame)
+            self._write_group_csv("Wave/Current Loads", data_frame)
+            self._write_group_csv("Wind/Aero Loads", data_frame)
+            self._write_group_csv("Mooring Loads", data_frame)
+
+        # 2. Store Memory (Full History)
         self.data_history.append(data_frame)
         t = data_frame['time']
         self.time_history.append(t)
@@ -167,7 +183,7 @@ class ScopeDockWidget(QWidget):
                 self.data_buffers[key] = []
             self.data_buffers[key].append(val)
 
-        # 2. Update Plots (Active only)
+        # 3. Update Plots (Active only)
         # Optimization: Don't convert full list to numpy array every frame if array is huge
         # But for <100k points, modern CPUs handle it fine.
         # For simplicity in V2.3: Convert full array.
@@ -186,7 +202,33 @@ class ScopeDockWidget(QWidget):
         self.data_buffers = {}
         self.plot_widget.clear()
         self.curves = {}
+        self.overlays = []
         self.update_channels(self.active_channels)
+        if self.enable_recording:
+            self._init_recording()
+
+    def _init_recording(self):
+        self._close_recording()
+        timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M")
+        folder = os.path.join("data", f"Run_{timestamp}")
+        if not os.path.exists(folder):
+            os.makedirs(folder)
+
+        self.current_log_path = folder
+        filenames = {
+            "Structure Response": f"dof{timestamp}.csv",
+            "Wave/Current Loads": f"hydro{timestamp}.csv",
+            "Wind/Aero Loads": f"wind_aero{timestamp}.csv",
+            "Mooring Loads": f"moor{timestamp}.csv",
+        }
+        for group, fn in filenames.items():
+            try:
+                path = os.path.join(folder, fn)
+                self.csv_files[group] = open(path, 'w', newline='')
+                self.csv_writers[group] = None
+            except:
+                self.csv_files[group] = None
+                self.csv_writers[group] = None
 
     def export_data(self):
         if not self.data_history: return
@@ -199,3 +241,62 @@ class ScopeDockWidget(QWidget):
                     writer.writeheader()
                     writer.writerows(self.data_history)
             except: pass
+
+    def set_save_config(self, config):
+        self.save_config = config or {}
+
+    def add_overlay(self, key, name, times, values, color):
+        if len(times) == 0:
+            return
+        self.overlays.append({
+            "key": key,
+            "name": name,
+            "times": np.array(times),
+            "values": np.array(values),
+            "color": color,
+        })
+        pen = pg.mkPen(color=color, style=Qt.DashLine, width=1.6)
+        label = f"{name} (history)"
+        self.plot_widget.plot(np.array(times), np.array(values), pen=pen, name=label)
+
+    def _close_recording(self):
+        for f in self.csv_files.values():
+            try:
+                if f:
+                    f.close()
+            except:
+                pass
+        self.csv_files = {}
+        self.csv_writers = {}
+
+    def _redraw_overlays(self):
+        if not self.overlays:
+            return
+        for overlay in self.overlays:
+            pen = pg.mkPen(color=overlay["color"], style=Qt.DashLine, width=1.6)
+            label = f'{overlay["name"]} (history)'
+            self.plot_widget.plot(overlay["times"], overlay["values"], pen=pen, name=label)
+
+    def _write_group_csv(self, group, data_frame):
+        csv_file = self.csv_files.get(group)
+        if not csv_file:
+            return
+        if self.csv_writers.get(group) is None:
+            fields = ["time"]
+            for k in self.save_config.get(group, []):
+                if k not in fields:
+                    fields.append(k)
+            writer = csv.DictWriter(csv_file, fieldnames=fields)
+            writer.writeheader()
+            self.csv_writers[group] = writer
+        else:
+            writer = self.csv_writers[group]
+
+        row = {"time": data_frame.get("time", data_frame.get("Time", 0.0))}
+        for k in self.save_config.get(group, []):
+            if k in data_frame:
+                row[k] = data_frame[k]
+        try:
+            writer.writerow(row)
+        except:
+            pass
