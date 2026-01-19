@@ -1,3 +1,5 @@
+import time
+
 from PySide6.QtWidgets import (QMainWindow, QMessageBox, QWidget, QVBoxLayout,
                                QHBoxLayout, QFrame, QPushButton, QFileDialog,
                                QLabel, QDoubleSpinBox, QSplitter)
@@ -22,6 +24,8 @@ class MainWindow(QMainWindow):
         self.worker = None
         self.log_base_dir = "."
         self.mode = "operator"
+        self._last_ui_update = 0.0
+        self._ui_interval = 1 / 30.0
 
         self.data_history = []
         self.init_layout()
@@ -43,7 +47,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, "_build_operator_view"):
             self.operator_widget = self._build_operator_view()
         else:
-            self.operator_widget = self._build_operator_bar()
+            self.operator_widget = self._build_bottom_bar()
         self.observer_widget = self._build_observer_view()
         self.observer_widget.hide()
 
@@ -237,32 +241,6 @@ class MainWindow(QMainWindow):
             self.widget_3d.params = self.params
 
     def on_save_file(self):
-        file_path, _ = QFileDialog.getSaveFileName(self, "保存文件", "", "Log Files (*.csv *.txt);;All Files (*)")
-        if file_path:
-            display_name = file_path.split("/")[-1]
-            self.btn_save_file.setText(f"文件: {display_name}")
-
-    def on_save_file(self):
-        folder = QFileDialog.getExistingDirectory(self, "选择数据保存通道", self.log_base_dir)
-        if folder:
-            self.log_base_dir = folder
-            display_name = folder.rstrip("/").split("/")[-1] or folder
-            self.btn_save_file.setText(f"数据保存: {display_name}")
-
-    def on_micro_start(self):
-        self.start_simulation(self.spin_time.value(), self.spin_dt.value())
-
-    def on_save_file(self):
-        folder = QFileDialog.getExistingDirectory(self, "选择数据保存通道", self.log_base_dir)
-        if folder:
-            self.log_base_dir = folder
-            display_name = folder.rstrip("/").split("/")[-1] or folder
-            self.btn_save_file.setText(f"数据保存: {display_name}")
-
-    def on_micro_start(self):
-        self.start_simulation(self.spin_time.value(), self.spin_dt.value())
-
-    def on_save_file(self):
         folder = QFileDialog.getExistingDirectory(self, "选择数据保存通道", self.log_base_dir)
         if folder:
             self.log_base_dir = folder
@@ -292,11 +270,15 @@ class MainWindow(QMainWindow):
 
     @Slot(dict)
     def on_data_update(self, data):
-        # 1. Update 3D View
         self.data_history.append(data)
         total_frames = len(self.data_history)
-        self.widget_3d.update_timeline(total_frames, data['time'])
 
+        now = time.monotonic()
+        if now - self._last_ui_update < self._ui_interval:
+            return
+        self._last_ui_update = now
+
+        self.widget_3d.update_timeline(total_frames, data['time'])
         if self.widget_3d.chk_sync.isChecked():
             self._update_3d_view(self.widget_3d, data)
         if self.mode == "observer":
