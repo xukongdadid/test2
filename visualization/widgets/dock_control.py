@@ -1,6 +1,7 @@
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QPushButton, QLabel, 
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QPushButton, QLabel,
                                QProgressBar, QGroupBox, QTreeWidget, QTreeWidgetItem,
-                               QDoubleSpinBox, QFormLayout, QComboBox, QHBoxLayout)
+                               QDoubleSpinBox, QFormLayout, QComboBox, QHBoxLayout,
+                               QCheckBox)
 from PySide6.QtCore import Signal, Qt
 from PySide6.QtWidgets import QTreeWidgetItemIterator
 
@@ -36,6 +37,7 @@ CHANNEL_CONFIG = {
     "Environment": {
         "Wind Speed (m/s)": "env_wind_speed",
         "Wave Elevation (m)": "env_wave_elev",
+        "Current Speed (m/s)": "env_current_speed",
         "Thrust (N)": "thrust", "Gen Torque (Nm)": "gen_torque"
     }
 }
@@ -85,6 +87,19 @@ class ControlDockWidget(QWidget):
         
         grp_sim.setLayout(layout_sim)
         self.layout.addWidget(grp_sim)
+
+        # --- Logging Selection ---
+        grp_log = QGroupBox("Data Logging (CSV)")
+        layout_log = QVBoxLayout()
+        self.chk_log_dof = QCheckBox("Structure DOF")
+        self.chk_log_hydro = QCheckBox("Wave/Current Loads (Hydro)")
+        self.chk_log_wind = QCheckBox("Wind/Aero Loads")
+        self.chk_log_moor = QCheckBox("Mooring Loads")
+        for chk in (self.chk_log_dof, self.chk_log_hydro, self.chk_log_wind, self.chk_log_moor):
+            chk.setChecked(True)
+            layout_log.addWidget(chk)
+        grp_log.setLayout(layout_log)
+        self.layout.addWidget(grp_log)
         
         # --- 22-DOF Channels ---
         grp_chan = QGroupBox("22-DOF Output Selection")
@@ -144,3 +159,11 @@ class ControlDockWidget(QWidget):
         self.progress.setValue(int(percent))
         mins, secs = divmod(int(elapsed_sec), 60)
         self.lbl_timer.setText(f"Elapsed: {mins:02d}:{secs:02d}")
+
+    def get_log_config(self):
+        return {
+            "save_dof": self.chk_log_dof.isChecked(),
+            "save_hydro": self.chk_log_hydro.isChecked(),
+            "save_wind_aero": self.chk_log_wind.isChecked(),
+            "save_moor": self.chk_log_moor.isChecked(),
+        }

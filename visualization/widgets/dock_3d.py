@@ -5,8 +5,15 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QSlider, QCheck
 from PySide6.QtCore import Qt, Signal
 import numpy as np
 
+from visualization.widgets.interactive_view import InteractiveGLViewWidget
+
+
 class View3DDockWidget(QWidget):
     sig_frame_request = Signal(int)
+    sig_edit_wind = Signal()
+    sig_edit_wave = Signal()
+    sig_edit_mooring = Signal()
+    sig_edit_structure = Signal()
 
     def __init__(self, params):
         super().__init__()
@@ -37,13 +44,13 @@ class View3DDockWidget(QWidget):
         self.z_cen_nac   = self.h_hub
 
         # 材质库
-        self.col_sky = QColor(135, 206, 235)
-        self.mat_white = (0.95, 0.95, 0.95, 1.0)
-        self.mat_red   = (0.9, 0.1, 0.1, 1.0) # 鲜艳红
-        self.mat_dark  = (0.2, 0.2, 0.2, 1.0)
-        self.mat_plat  = (0.95, 0.8, 0.0, 1.0)
-        self.mat_tp    = (0.1, 0.1, 0.1, 1.0)
-        self.mat_fairlead = (1.0, 0.5, 0.0, 1.0) # 橙色导缆孔
+        self.col_sky = QColor(120, 170, 210)
+        self.mat_white = (0.96, 0.96, 0.98, 1.0)
+        self.mat_red   = (0.85, 0.15, 0.15, 1.0)
+        self.mat_dark  = (0.15, 0.18, 0.2, 1.0)
+        self.mat_plat  = (0.85, 0.75, 0.2, 1.0)
+        self.mat_tp    = (0.2, 0.2, 0.25, 1.0)
+        self.mat_fairlead = (1.0, 0.5, 0.0, 1.0)
 
         self.setup_ui()
         self.init_scene()
@@ -51,10 +58,15 @@ class View3DDockWidget(QWidget):
     def setup_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        self.view = gl.GLViewWidget()
+        self.view = InteractiveGLViewWidget()
         self.view.setBackgroundColor(self.col_sky)
         self.view.setCameraPosition(distance=180, elevation=15, azimuth=-140)
         layout.addWidget(self.view)
+
+        self.view.clicked_sky.connect(self.sig_edit_wind.emit)
+        self.view.clicked_wave.connect(self.sig_edit_wave.emit)
+        self.view.clicked_mooring.connect(self.sig_edit_mooring.emit)
+        self.view.clicked_structure.connect(self.sig_edit_structure.emit)
 
         ctrl_bar = QHBoxLayout(); ctrl_bar.setContentsMargins(5, 5, 5, 5)
         self.chk_sync = QCheckBox("Live Sync"); self.chk_sync.setChecked(True)
@@ -224,8 +236,8 @@ class View3DDockWidget(QWidget):
     def _compute_wave_colors(self, Z):
         z_min, z_max = Z.min(), Z.max()
         z_norm = (Z - z_min) / (z_max - z_min + 1e-5)
-        deep = np.array([0.0, 0.2, 0.5], dtype=np.float32)
-        foam = np.array([0.9, 0.9, 1.0], dtype=np.float32)
+        deep = np.array([0.0, 0.25, 0.45], dtype=np.float32)
+        foam = np.array([0.7, 0.85, 0.95], dtype=np.float32)
         col = (1-z_norm[...,None])*deep + z_norm[...,None]*foam
         alpha = np.ones_like(Z)[...,None]
         return np.concatenate([col, alpha], axis=-1)
