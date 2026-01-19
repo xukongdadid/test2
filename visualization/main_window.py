@@ -1,3 +1,5 @@
+import time
+
 from PySide6.QtWidgets import (QMainWindow, QMessageBox, QWidget, QVBoxLayout,
                                QHBoxLayout, QFrame, QPushButton, QFileDialog,
                                QLabel, QDoubleSpinBox, QSplitter)
@@ -22,6 +24,8 @@ class MainWindow(QMainWindow):
         self.worker = None
         self.log_base_dir = "."
         self.mode = "operator"
+        self._last_ui_update = 0.0
+        self._ui_interval = 1 / 30.0
 
         self.data_history = []
         self.init_layout()
@@ -266,11 +270,15 @@ class MainWindow(QMainWindow):
 
     @Slot(dict)
     def on_data_update(self, data):
-        # 1. Update 3D View
         self.data_history.append(data)
         total_frames = len(self.data_history)
-        self.widget_3d.update_timeline(total_frames, data['time'])
 
+        now = time.monotonic()
+        if now - self._last_ui_update < self._ui_interval:
+            return
+        self._last_ui_update = now
+
+        self.widget_3d.update_timeline(total_frames, data['time'])
         if self.widget_3d.chk_sync.isChecked():
             self._update_3d_view(self.widget_3d, data)
         if self.mode == "observer":
